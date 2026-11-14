@@ -1,0 +1,20 @@
+# Device and server secrets. Examples (*example*) stay in git.
+**/secrets.py
+**/secrets.h
+**/.env
+!.env.example
+
+# Runtime data
+server/data/
+**/*.sqlite
+**/*.sqlite-journal
+**/*.mpy
+**/__pycache__/
+**/.venv/
+**/node_modules/
+
+# Firmware build output
+**/.pio/
+**/.cache/
+
+.DS_Store

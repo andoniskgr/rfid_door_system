@@ -1,0 +1,27 @@
+# Drop this file in /etc/mosquitto/conf.d/door.conf
+# Then: sudo systemctl reload mosquitto
+#
+# listener 1883 accepts the Pico and the ESP-01 from the home LAN.
+# Do not forward port 1883 on the router. The web app is the Tailscale surface;
+# the broker is not.
+#
+# If Mosquitto reports "Address already in use", the package config already has
+# a listener. Keep a single "listener 1883" and leave the auth lines here.
+
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/acl
+
+listener 1883
+protocol mqtt
+
+# Optional TLS, once the ESP-01 has been measured with BearSSL in the heap budget.
+# The Pico W and the server can speak TLS. The ESP-01 often cannot, alongside Wi-Fi.
+# Command integrity does not depend on this block: open commands are HMAC-signed.
+#
+# listener 8883
+# protocol mqtt
+# cafile /etc/mosquitto/certs/ca.crt
+# certfile /etc/mosquitto/certs/server.crt
+# keyfile /etc/mosquitto/certs/server.key
+# require_certificate false

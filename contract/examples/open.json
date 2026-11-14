@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "aa11bb22cc33dd44ee55ff6677889900",
+  "ts": 1731510242,
+  "nonce": "00112233445566778899aabbccddeeff",
+  "duration_ms": 3000,
+  "source": "server",
+  "reason": "manual",
+  "mac": "fc4ae0a23cf007148c2069ff620905394979b36dc8cb9bcca4cabab469341402"
+}

@@ -1,0 +1,21 @@
+# Mosquitto ACL for the door. One user per process.
+# read = subscribe, write = publish. Anything not listed is refused.
+# Install: see contract/README.md
+
+user door-reader
+topic read door/reader/allowlist
+topic read door/reader/feedback
+topic write door/reader/uid
+topic write door/reader/local
+topic write door/reader/log
+topic write door/reader/status
+topic write door/actuator/open
+
+user door-actuator
+topic read door/actuator/open
+topic write door/actuator/status
+topic write door/actuator/result
+
+user door-server
+topic read door/#
+topic write door/#

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "11111111111111111111111111111111",
+  "online": true,
+  "ts": 1794582240,
+  "fw": "0.1.0",
+  "uptime_s": 3600,
+  "ip": "192.168.1.40",
+  "rssi": -62,
+  "ntp": true,
+  "allowlist_version": 3,
+  "log_queued": 0
+}
