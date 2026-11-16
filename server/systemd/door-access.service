@@ -1,0 +1,19 @@
+[Unit]
+Description=RFID door access server
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=door
+Group=door
+WorkingDirectory=/opt/door/server
+EnvironmentFile=/opt/door/server/.env
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
