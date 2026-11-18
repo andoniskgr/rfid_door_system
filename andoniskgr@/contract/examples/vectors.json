@@ -1,0 +1,17 @@
+{
+  "open_secret_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+  "allowlist_key_hex": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+  "canonical": "v1|aa11bb22cc33dd44ee55ff6677889900|1731510242|00112233445566778899aabbccddeeff|3000|server|manual",
+  "uid": "A1B2C3D4",
+  "uid_hash": "9df6c4223f761e42e6b99a6f34008d794f4305a89da9b85dfc028234826e75ac",
+  "open": {
+    "schema": 1,
+    "id": "aa11bb22cc33dd44ee55ff6677889900",
+    "ts": 1731510242,
+    "nonce": "00112233445566778899aabbccddeeff",
+    "duration_ms": 3000,
+    "source": "server",
+    "reason": "manual",
+    "mac": "fc4ae0a23cf007148c2069ff620905394979b36dc8cb9bcca4cabab469341402"
+  }
+}

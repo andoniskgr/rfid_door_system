@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "c0ffee00c0ffee00c0ffee00c0ffee00",
+  "ts": 1731510300,
+  "version": 3,
+  "hash": "hmac-sha256",
+  "utc_offset_min": 120,
+  "entries": [
+    {
+      "h": "9df6c4223f761e42e6b99a6f34008d794f4305a89da9b85dfc028234826e75ac",
+      "exp": 1893456000,
+      "sch": "1-5,08:00-20:00"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "b1041d0e0a11b1041d0e0a11b1041d0e",
+  "ts": 1794582300,
+  "entries": [
+    {
+      "id": "7f3c1a0e9b2d4f6a8c0e1d2b3a495868",
+      "ts": 1794582240,
+      "uid": "A1B2C3D4",
+      "device": "entrance",
+      "granted": true,
+      "reason": "not_actuated",
+      "allowlist_version": 3,
+      "open_id": null
+    }
+  ]
+}
