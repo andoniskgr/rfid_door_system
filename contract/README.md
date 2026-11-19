@@ -15,7 +15,7 @@ Clients use a clean session, MQTT keepalive **60 seconds**, and QoS 1. The tools
 | Heartbeat | 30 s | Retained status publish |
 | MQTT keepalive | 60 s | Broker publishes the Last Will about 90 s after a hard drop |
 | Offline threshold | 90 s | Server treats a silent device as offline |
-| Open pulse | 3000 ms | Default. Allowed range 200–10000 |
+| Open pulse | 3000 ms | Starting value. Settings can set 200–10000. The ESP-01 will not go past 10000 |
 | Hard maximum | 10000 ms | Compiled into the ESP-01. A command cannot raise it |
 | Clock window | ±30 s | Open command `ts` against the actuator clock |
 | Nonce ring | 32 | Last accepted nonces, stored in flash |
@@ -90,7 +90,7 @@ Examples live in `contract/examples/`. The shapes below are the required fields.
 }
 ```
 
-Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time. `sch` is evaluated with `utc_offset_min` from this message. The Pico stores the message in flash and replaces it when `version` is greater than or equal to the stored version. `hash` must be `hmac-sha256`.
+Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time. `sch` is evaluated with `utc_offset_min` from this message. `open_ms` is the relay pulse, 200–10000. The Pico uses it for an offline grant and keeps the previous value when the field is missing. The Pico stores the message in flash and replaces it when `version` is greater than or equal to the stored version. `hash` must be `hmac-sha256`.
 
 **Open** `door/actuator/open`. See the HMAC section. `source` is `server` or `reader`. `reason` is `tag`, `manual`, or `offline`.
 

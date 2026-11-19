@@ -15,7 +15,7 @@ The wire rules and the no-hardware tests are in [contract/README.md](contract/RE
 
 The Pico publishes the UID and waits 1.2 seconds. If the server answers, the server decides and, on a grant, sends a signed open command to the ESP-01. If the server does not answer, the Pico checks a cached allowlist of HMAC-SHA256 UID hashes and can send that open command itself. The allowlist is a retained MQTT message, versioned, and refreshed when tags change.
 
-The ESP-01 pulses a relay for the commanded time (default 3 seconds, hard maximum 10). It rejects stale, replayed, and badly signed commands. The relay is active-low on GPIO2 with an external pull-up, and the buzzer is wired on the normally open contact, so a reset or a power loss leaves the door locked.
+The ESP-01 pulses a relay for the time set under Settings (3 seconds until you change it, hard maximum 10). It rejects stale, replayed, and badly signed commands. The relay is active-low on GPIO2 with an external pull-up, and the buzzer is wired on the normally open contact, so a reset or a power loss leaves the door locked.
 
 Secrets stay in `secrets.py` / `secrets.h` and the server environment. Those files are gitignored.
 

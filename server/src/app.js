@@ -6,7 +6,7 @@ const express = require('express');
 const session = require('express-session');
 const QRCode = require('qrcode');
 const { WebSocketServer } = require('ws');
-const { normalizeUid } = require('../../contract/policy');
+const { LIMITS, normalizeUid } = require('../../contract/policy');
 const auth = require('./auth');
 const dbApi = require('./db');
 const { SqliteSessionStore } = require('./session-store');
@@ -341,6 +341,32 @@ function createApp({ db, config, door }) {
     res.redirect(303, '/settings');
   });
 
+  app.post('/settings/open', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    const ms = parseOpenSeconds(req.body.seconds);
+    if (ms == null) {
+      res.status(400).type('html').send(settingsView(req, {
+        doorError: 'Open time must be from 0.2 to 10 seconds.',
+      }));
+      return;
+    }
+    const label = formatOpenSeconds(ms);
+    try {
+      await door.setOpenMs(ms);
+      req.session.flash = { type: 'ok', text: `The relay stays on for ${label} seconds.` };
+    } catch (err) {
+      if (err.status === 400) {
+        res.status(400).type('html').send(settingsView(req, { doorError: err.message }));
+        return;
+      }
+      console.error('allowlist', err.message);
+      req.session.flash = {
+        type: 'bad',
+        text: 'Saved here. The reader has not received the new open time because the broker is down.',
+      };
+    }
+    res.redirect(303, '/settings');
+  }));
+
   app.post('/settings/wifi/scan', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
     try {
       const networks = await door.scanReaderWifi();
@@ -435,6 +461,8 @@ function createApp({ db, config, door }) {
       telegramConfigured: Boolean(config.telegramToken),
       username: req.session.adminUser,
       passwordError: extra.passwordError,
+      doorError: extra.doorError,
+      openSeconds: formatOpenSeconds(door.openMs()),
       wifiError: extra.wifiError,
       reader: presentDevice(row, config.tz),
       networks: door.wifiNetworks(),
@@ -701,6 +729,22 @@ function csvCell(value) {
   const text = String(value ?? '');
   if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
+}
+
+function parseOpenSeconds(raw) {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!/^\d{1,2}(\.\d{1,3})?$/.test(text)) return null;
+  const ms = Math.round(Number(text) * 1000);
+  if (!Number.isInteger(ms) || ms < LIMITS.OPEN_MIN_MS || ms > LIMITS.OPEN_MAX_MS) return null;
+  return ms;
+}
+
+function formatOpenSeconds(ms) {
+  const rounded = Math.round(Number(ms));
+  const whole = Math.floor(rounded / 1000);
+  const frac = String(rounded % 1000).padStart(3, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : String(whole);
 }
 
 function asyncRoute(fn) {

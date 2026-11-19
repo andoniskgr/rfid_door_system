@@ -54,8 +54,10 @@ def _setup_secret(value):
     )
 
 
-def open_ms():
-    value = _int(getattr(secrets, "OPEN_MS", 3000), 3000)
+def open_ms(store):
+    value = _int(store.open_ms, 0)
+    if value < 200 or value > 10000:
+        value = _int(getattr(secrets, "OPEN_MS", 3000), 3000)
     if value < 200 or value > 10000:
         return 3000
     return value
@@ -434,7 +436,7 @@ class Reader:
             self._record(read_id, uid, ts, decision, None)
             self.ui.show(False)
             return
-        cmd = sign_open(secrets.DOOR_HMAC_SECRET, ts, open_ms(), "offline")
+        cmd = sign_open(secrets.DOOR_HMAC_SECRET, ts, open_ms(self.store), "offline")
         if self.mqtt.connected and self._publish_open(cmd):
             self._record(read_id, uid, ts, decision, cmd["id"])
             self.ui.show(True)

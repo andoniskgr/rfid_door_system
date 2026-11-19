@@ -6,6 +6,14 @@ import os
 from policy import ALLOWLIST_MAX, LOG_QUEUE
 
 
+def _pulse(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if value < 200 or value > 10000:
+        return None
+    return value
+
+
 def _load(path):
     try:
         with open(path, "r") as handle:
@@ -35,6 +43,7 @@ class Store:
         self.utc_offset_min = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
         entries = saved.get("entries")
         self.entries = entries if isinstance(entries, list) else []
+        self.open_ms = _pulse(saved.get("open_ms"))
         logged = _load(log_path) or {}
         rows = logged.get("entries")
         self.entries_log = rows if isinstance(rows, list) else []
@@ -55,14 +64,21 @@ class Store:
             return False
         if version < self.version:
             return False
+        pulse = _pulse(message.get("open_ms"))
+        if pulse is None:
+            pulse = self.open_ms
         self.version = version
         self.utc_offset_min = offset
         self.entries = entries
-        _save(self.allow_path, {
+        self.open_ms = pulse
+        saved = {
             "version": version,
             "utc_offset_min": offset,
             "entries": entries,
-        })
+        }
+        if pulse is not None:
+            saved["open_ms"] = pulse
+        _save(self.allow_path, saved)
         return True
 
     def enqueue(self, entry):

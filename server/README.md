@@ -74,6 +74,10 @@ It should show `127.0.0.1:3000`.
 
 A database backup is written to `data/backups/` once a day, the first time the process is running after 03:00 in `TZ`. Fourteen copies are kept. The allowlist is published again after 03:05, and also whenever tags change or the UTC offset changes.
 
+## Door open time
+
+Settings sets how long the relay stays on, from 0.2 to 10 seconds. `DOOR_OPEN_MS` is the starting value. A granted tag and Open now use the saved time immediately. The same value is included in the retained allowlist, so an offline grant on the reader uses it after that message arrives. Reader firmware that does not store `open_ms` keeps `OPEN_MS` from `secrets.py`.
+
 ## Reader Wi-Fi
 
 Settings can ask the entrance reader to scan, then lists the networks it can see. Choose one and enter its password, or clear the saved network. The reader has to be online. Changing the network needs firmware 0.2.0 or newer. The scan list needs 0.3.0 or newer. The home Wi-Fi password is published once on `door/reader/wifi` and is not stored on the Pi. A wrong password leaves the reader on its current network.

@@ -20,4 +20,5 @@ DOOR_HMAC_SECRET = ""
 ALLOWLIST_HMAC_KEY = ""
 
 DEVICE = "entrance"
+# Used for an offline grant until the allowlist includes open_ms from Settings.
 OPEN_MS = 3000

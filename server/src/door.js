@@ -39,6 +39,16 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return currentOffsetMin(config.tz, new Date(now() * 1000));
   }
 
+  function openMs() {
+    const raw = dbApi.getSetting(db, 'open_ms');
+    if (raw == null || raw === '') return config.openMs;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < LIMITS.OPEN_MIN_MS || value > LIMITS.OPEN_MAX_MS) {
+      return config.openMs;
+    }
+    return value;
+  }
+
   function broadcastEvent(row) {
     if (!row) return;
     hub.broadcast({ type: 'event', event: presentEvent(row, config.tz) });
@@ -131,7 +141,8 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       return entry;
     }).sort((a, b) => (a.h < b.h ? -1 : 1));
     const utcOffset = offset();
-    const fingerprint = JSON.stringify({ entries, utcOffset });
+    const pulse = openMs();
+    const fingerprint = JSON.stringify({ entries, utcOffset, openMs: pulse });
     let version = Number(dbApi.getSetting(db, 'allowlist_version') || '1');
     const previous = dbApi.getSetting(db, 'allowlist_fingerprint');
     if (previous != null && previous !== fingerprint) version += 1;
@@ -145,6 +156,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       version,
       hash: 'hmac-sha256',
       utc_offset_min: utcOffset,
+      open_ms: pulse,
       entries,
     };
     await publish('door/reader/allowlist', body, true);
@@ -157,7 +169,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       id: randomId(),
       ts: now(),
       nonce: randomId(),
-      duration_ms: config.openMs,
+      duration_ms: openMs(),
       source,
       reason,
     });
@@ -511,6 +523,17 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return lastWifiScan;
   }
 
+  async function setOpenMs(ms) {
+    if (!Number.isInteger(ms) || ms < LIMITS.OPEN_MIN_MS || ms > LIMITS.OPEN_MAX_MS) {
+      const err = new Error('Open time must be from 0.2 to 10 seconds.');
+      err.status = 400;
+      throw err;
+    }
+    dbApi.setSetting(db, 'open_ms', String(ms));
+    await publishAllowlist();
+    return ms;
+  }
+
   async function forgetReaderWifi() {
     requireReader(2);
     const setupPassword = makeSetupPassword();
@@ -534,7 +557,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
   }
 
   return {
-    handle, sweep, publishAllowlist, openNow, setReaderWifi, scanReaderWifi, forgetReaderWifi, wifiNetworks, snapshot,
+    handle, sweep, publishAllowlist, openNow, setReaderWifi, scanReaderWifi, forgetReaderWifi, wifiNetworks, openMs, setOpenMs, snapshot,
   };
 }
 

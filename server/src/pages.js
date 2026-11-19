@@ -337,7 +337,7 @@ function networkChoices(networks) {
   }).join('');
 }
 
-function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, wifiError, reader, networks = [] }) {
+function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, doorError, openSeconds, wifiError, reader, networks = [] }) {
   let where = 'The reader is offline.';
   if (reader.online && reader.ssid) {
     where = `The reader is on ${reader.ssid}${reader.ip ? ` at ${reader.ip}` : ''}.`;
@@ -361,6 +361,14 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured, username, pass
         ${box('device', 'Device online or offline')}
         ${box('manual', 'Manual open')}
         <button type="submit">Save</button>
+      </form>
+      <h2>Door</h2>
+      <p class="muted">How long the relay stays on after a granted tag or Open now. From 0.2 to 10 seconds. An offline grant on the reader uses the same time after the next allowlist update.</p>
+      ${doorError ? `<p class="flash bad">${esc(doorError)}</p>` : ''}
+      <form method="post" action="/settings/open" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('Open time (seconds)', `<input name="seconds" type="number" min="0.2" max="10" step="0.1" inputmode="decimal" required value="${esc(openSeconds)}">`)}
+        <button type="submit">Save open time</button>
       </form>
       <h2>Reader Wi-Fi</h2>
       <p class="muted">${esc(where)} Scan lists the networks at the door. Choose one and enter its password. A wrong password leaves the reader on the current network. Reset clears the saved network and starts Door-Setup for 10 minutes.</p>

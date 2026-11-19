@@ -825,6 +825,43 @@ test('settings can scan networks at the reader', async () => {
   }
 });
 
+test('settings can change how long the relay stays on', async () => {
+  const clock = { t: 1700000000 };
+  const ctx = await start({ now: () => clock.t });
+  try {
+    await enroll(ctx);
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /name="seconds"/);
+    assert.match(html, /value="3"/);
+
+    let res = await ctx.agent.post('/settings/open', { _csrf: csrfOf(html), seconds: '0.1' });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /0\.2 to 10/);
+
+    html = await (await ctx.agent.fetch('/settings')).text();
+    res = await ctx.agent.post('/settings/open', { _csrf: csrfOf(html), seconds: '4.5' });
+    assert.equal(res.status, 303);
+    const saved = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(saved, /stays on for 4\.5 seconds/);
+    assert.match(saved, /value="4\.5"/);
+    const allow = ctx.transport.messages.filter((item) => item.topic === 'door/reader/allowlist');
+    assert.equal(allow.at(-1).payload.open_ms, 4500);
+
+    await ctx.agent.post('/tags', {
+      _csrf: csrfOf(await (await ctx.agent.fetch('/tags')).text()),
+      uid: 'A1B2C3D4',
+      name: 'Ada',
+    });
+    ctx.transport.messages.length = 0;
+    clock.t += 3;
+    await ctx.door.handle('door/reader/uid', uidMessage('A1B2C3D4'));
+    const open = ctx.transport.messages.find((item) => item.topic === 'door/actuator/open');
+    assert.equal(open.payload.duration_ms, 4500);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('websocket snapshot requires the session', async () => {
   const ctx = await start();
   try {

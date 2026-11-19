@@ -34,7 +34,7 @@ mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py 
 mpremote reset
 ```
 
-Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy.
+Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
 
 Reload Mosquitto after installing the ACL in `contract/mosquitto/acl`. The reader has to be allowed to subscribe to `door/reader/wifi`, or the Settings page can send a network the Pico never receives.
 
