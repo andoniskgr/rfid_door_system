@@ -418,6 +418,57 @@ function createApp({ db, config, door }) {
     }
   }));
 
+  app.post('/settings/actuator/wifi/scan', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    try {
+      const networks = await door.scanActuatorWifi();
+      req.session.flash = {
+        type: 'ok',
+        text: networks.length
+          ? `Found ${networks.length} networks. Choose one and enter its password.`
+          : 'The actuator found no networks. Scan again, or type the name below.',
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { actuatorWifiError: err.message }));
+    }
+  }));
+
+  app.post('/settings/actuator/wifi', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    try {
+      const saved = await door.setActuatorWifi(chosenSsid(req.body), typeof req.body.password === 'string' ? req.body.password : '');
+      req.session.flash = {
+        type: 'ok',
+        text: `The actuator is switching to ${saved.ssid}. If that network does not accept it, the actuator stays on the current one.`,
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { actuatorWifiError: err.message }));
+    }
+  }));
+
+  app.post('/settings/actuator/wifi/reset', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    if (req.body.confirm !== 'reset') {
+      res.status(400).type('html').send(settingsView(req, { actuatorWifiError: 'Type reset to clear the actuator\'s Wi-Fi.' }));
+      return;
+    }
+    try {
+      const saved = await door.forgetActuatorWifi();
+      req.session.flash = {
+        type: 'ok',
+        text: `The actuator cleared its network and will broadcast Actuator-Setup for 10 minutes. Join that network with password ${saved.setupPassword}, open http://192.168.4.1, and enter the new Wi-Fi. Then reconnect this browser to the home network.`,
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { actuatorWifiError: err.message }));
+    }
+  }));
+
   app.post('/settings/password', requireAdmin, requireCsrf, asyncRoute(async (req, res, next) => {
     const shape = auth.checkPasswordShape(req.body.password, req.body.password2);
     if (shape) {
@@ -454,6 +505,7 @@ function createApp({ db, config, door }) {
     const toggles = {};
     for (const [name, key] of Object.entries(TOGGLES)) toggles[name] = dbApi.getSetting(db, key) === '1';
     const row = dbApi.getDevice(db, 'reader');
+    const actuator = dbApi.getDevice(db, 'actuator');
     return pages.settingsPage({
       csrf: req.session.csrf,
       flash: extra.flash,
@@ -464,8 +516,11 @@ function createApp({ db, config, door }) {
       doorError: extra.doorError,
       openSeconds: formatOpenSeconds(door.openMs()),
       wifiError: extra.wifiError,
+      actuatorWifiError: extra.actuatorWifiError,
       reader: presentDevice(row, config.tz),
-      networks: door.wifiNetworks(),
+      actuator: presentDevice(actuator, config.tz),
+      networks: door.wifiNetworks('reader'),
+      actuatorNetworks: door.wifiNetworks('actuator'),
     });
   }
 

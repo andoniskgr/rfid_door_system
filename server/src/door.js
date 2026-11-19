@@ -33,7 +33,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
   const denyNotified = new Map();
   const unknownNotified = new Map();
   const scanWaiters = new Map();
-  let lastWifiScan = [];
+  const networksByRole = { reader: [], actuator: [] };
 
   function offset() {
     return currentOffsetMin(config.tz, new Date(now() * 1000));
@@ -288,7 +288,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       telegram.notify('device', `${name} is ${online ? 'online' : 'offline'}.`);
     }
     broadcastDevices();
-    if (role === 'reader') noteScan(msg);
+    if (role === 'reader' || role === 'actuator') noteScan(role, msg);
   }
 
   function onResult(msg) {
@@ -389,8 +389,8 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return value;
   }
 
-  function readerState() {
-    const row = dbApi.getDevice(db, 'reader');
+  function deviceState(role) {
+    const row = dbApi.getDevice(db, role);
     let payload = {};
     if (row && row.payload) {
       try { payload = JSON.parse(row.payload); } catch { payload = {}; }
@@ -405,27 +405,38 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return nums[0] > 0 || nums[1] >= minor;
   }
 
-  function requireReader(minor) {
+  function requireDevice(role, minor) {
     if (!transport.connected) {
       const err = new Error('The broker is not connected.');
       err.code = 'NO_MQTT';
       throw err;
     }
-    const reader = readerState();
-    if (!reader.online) {
-      const err = new Error('The reader is offline, so it cannot take a new network. Hold the setup button at the door, or power-cycle the reader if it has no saved network.');
+    const device = deviceState(role);
+    if (!device.online) {
+      const err = new Error(role === 'actuator'
+        ? 'The actuator is offline, so it cannot take a new network. Power-cycle it if it has no saved network.'
+        : 'The reader is offline, so it cannot take a new network. Hold the setup button at the door, or power-cycle the reader if it has no saved network.');
       err.code = 'OFFLINE';
       throw err;
     }
-    if (!firmwareCanSetWifi(reader.fw, minor)) {
-      const shown = reader.fw || 'an older version';
-      const text = minor >= 3
-        ? `Reflash the reader to scan for networks. This one is still on firmware ${shown}.`
-        : `Reflash the reader before changing Wi-Fi. This one is still on firmware ${shown}.`;
+    if (!firmwareCanSetWifi(device.fw, minor)) {
+      const shown = device.fw || 'an older version';
+      let text;
+      if (role === 'actuator') {
+        text = `Reflash the actuator before changing Wi-Fi. This one is still on firmware ${shown}.`;
+      } else if (minor >= 3) {
+        text = `Reflash the reader to scan for networks. This one is still on firmware ${shown}.`;
+      } else {
+        text = `Reflash the reader before changing Wi-Fi. This one is still on firmware ${shown}.`;
+      }
       const err = new Error(text);
       err.code = 'OLD_FW';
       throw err;
     }
+  }
+
+  function wifiTopic(role) {
+    return role === 'actuator' ? 'door/actuator/wifi' : 'door/reader/wifi';
   }
 
   function cleanNetworks(value) {
@@ -447,10 +458,10 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return out;
   }
 
-  function noteScan(msg) {
+  function noteScan(role, msg) {
     if (!msg || typeof msg.scan_id !== 'string') return;
     const networks = cleanNetworks(msg.networks);
-    lastWifiScan = networks;
+    if (role === 'reader' || role === 'actuator') networksByRole[role] = networks;
     const waiter = scanWaiters.get(msg.scan_id);
     if (!waiter) return;
     scanWaiters.delete(msg.scan_id);
@@ -466,7 +477,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return out;
   }
 
-  async function setReaderWifi(ssid, password) {
+  async function setDeviceWifi(role, minor, ssid, password) {
     const name = cleanSsid(ssid);
     const secret = cleanPassword(password);
     if (!name) {
@@ -479,8 +490,8 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       err.code = 'BAD_WIFI';
       throw err;
     }
-    requireReader(2);
-    await publish('door/reader/wifi', {
+    requireDevice(role, minor);
+    await publish(wifiTopic(role), {
       schema: 1,
       id: randomId(),
       ts: now(),
@@ -491,21 +502,21 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return { ssid: name };
   }
 
-  async function scanReaderWifi() {
-    requireReader(3);
+  async function scanDeviceWifi(role, minor, timeoutMessage) {
+    requireDevice(role, minor);
     const id = randomId();
     let timer;
     const pending = new Promise((resolve, reject) => {
       timer = setTimeout(() => {
         scanWaiters.delete(id);
-        const err = new Error('The reader did not return a scan. Reflash it if this Pico is not on firmware 0.3.0.');
+        const err = new Error(timeoutMessage);
         err.code = 'TIMEOUT';
         reject(err);
       }, 12000);
       scanWaiters.set(id, { resolve, reject, timer });
     });
     try {
-      await publish('door/reader/wifi', {
+      await publish(wifiTopic(role), {
         schema: 1,
         id,
         ts: now(),
@@ -519,8 +530,24 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return pending;
   }
 
-  function wifiNetworks() {
-    return lastWifiScan;
+  function wifiNetworks(role) {
+    return networksByRole[role] || [];
+  }
+
+  async function setReaderWifi(ssid, password) {
+    return setDeviceWifi('reader', 2, ssid, password);
+  }
+
+  async function scanReaderWifi() {
+    return scanDeviceWifi('reader', 3, 'The reader did not return a scan. Reflash it if this Pico is not on firmware 0.3.0.');
+  }
+
+  async function setActuatorWifi(ssid, password) {
+    return setDeviceWifi('actuator', 2, ssid, password);
+  }
+
+  async function scanActuatorWifi() {
+    return scanDeviceWifi('actuator', 2, 'The actuator did not return a scan. Reflash it if this ESP-01 is not on firmware 0.2.0.');
   }
 
   async function setOpenMs(ms) {
@@ -534,10 +561,10 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return ms;
   }
 
-  async function forgetReaderWifi() {
-    requireReader(2);
+  async function forgetDeviceWifi(role, minor) {
+    requireDevice(role, minor);
     const setupPassword = makeSetupPassword();
-    await publish('door/reader/wifi', {
+    await publish(wifiTopic(role), {
       schema: 1,
       id: randomId(),
       ts: now(),
@@ -545,6 +572,14 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       setup_password: setupPassword,
     }, false);
     return { setupPassword };
+  }
+
+  async function forgetReaderWifi() {
+    return forgetDeviceWifi('reader', 2);
+  }
+
+  async function forgetActuatorWifi() {
+    return forgetDeviceWifi('actuator', 2);
   }
 
   function snapshot() {
@@ -557,7 +592,8 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
   }
 
   return {
-    handle, sweep, publishAllowlist, openNow, setReaderWifi, scanReaderWifi, forgetReaderWifi, wifiNetworks, openMs, setOpenMs, snapshot,
+    handle, sweep, publishAllowlist, openNow, setReaderWifi, scanReaderWifi, forgetReaderWifi,
+    setActuatorWifi, scanActuatorWifi, forgetActuatorWifi, wifiNetworks, openMs, setOpenMs, snapshot,
   };
 }
 

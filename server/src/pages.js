@@ -328,8 +328,17 @@ function logPage({ csrf, flash, rows, filters, page, pages, total }) {
   });
 }
 
-function networkChoices(networks) {
-  if (!networks.length) return '<p class="muted">Scan to list the networks the reader can see.</p>';
+function wifiWhere(device, name) {
+  if (device.online && device.ssid) {
+    return `The ${name} is on ${device.ssid}${device.ip ? ` at ${device.ip}` : ''}.`;
+  }
+  if (device.online) return `The ${name} is online and has not reported a network yet.`;
+  if (device.ssid) return `The ${name} is offline. Last network was ${device.ssid}.`;
+  return `The ${name} is offline.`;
+}
+
+function networkChoices(networks, emptyText) {
+  if (!networks.length) return `<p class="muted">${esc(emptyText)}</p>`;
   return networks.map((item) => {
     let label = item.ssid;
     if (item.rssi != null) label += ` (${item.rssi} dBm${item.secure ? '' : ', open'})`;
@@ -337,15 +346,26 @@ function networkChoices(networks) {
   }).join('');
 }
 
-function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, doorError, openSeconds, wifiError, reader, networks = [] }) {
-  let where = 'The reader is offline.';
-  if (reader.online && reader.ssid) {
-    where = `The reader is on ${reader.ssid}${reader.ip ? ` at ${reader.ip}` : ''}.`;
-  } else if (reader.online) {
-    where = 'The reader is online and has not reported a network yet.';
-  } else if (reader.ssid) {
-    where = `The reader is offline. Last network was ${reader.ssid}.`;
-  }
+function wifiForms({ csrf, scanAction, saveAction, resetAction, networks, emptyText }) {
+  return `<form method="post" action="${scanAction}" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <button type="submit">Scan networks</button>
+      </form>
+      <form method="post" action="${saveAction}" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${networkChoices(networks, emptyText)}
+        ${field('Hidden network', '<input name="other" maxlength="32" autocomplete="off">')}
+        ${field('Password', '<input name="password" type="password" maxlength="63" autocomplete="new-password">')}
+        <button type="submit">Save network</button>
+      </form>
+      <form method="post" action="${resetAction}" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('Type reset to confirm', '<input name="confirm" autocomplete="off" required>')}
+        <button type="submit">Reset Wi-Fi</button>
+      </form>`;
+}
+
+function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, doorError, openSeconds, wifiError, actuatorWifiError, reader, actuator = { online: false, ssid: '', ip: '' }, networks = [], actuatorNetworks = [] }) {
   const box = (name, label) => `<label class="check"><input type="checkbox" name="${name}" value="1"${toggles[name] ? ' checked' : ''}> ${label}</label>`;
   return layout({
     title: 'Settings',
@@ -371,24 +391,27 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured, username, pass
         <button type="submit">Save open time</button>
       </form>
       <h2>Reader Wi-Fi</h2>
-      <p class="muted">${esc(where)} Scan lists the networks at the door. Choose one and enter its password. A wrong password leaves the reader on the current network. Reset clears the saved network and starts Door-Setup for 10 minutes.</p>
+      <p class="muted">${esc(`${wifiWhere(reader, 'reader')} Scan lists the networks at the door. Choose one and enter its password. A wrong password leaves the reader on the current network. Reset clears the saved network and starts Door-Setup for 10 minutes.`)}</p>
       ${wifiError ? `<p class="flash bad">${esc(wifiError)}</p>` : ''}
-      <form method="post" action="/settings/wifi/scan" class="stack">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <button type="submit">Scan networks</button>
-      </form>
-      <form method="post" action="/settings/wifi" class="stack">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        ${networkChoices(networks)}
-        ${field('Hidden network', '<input name="other" maxlength="32" autocomplete="off">')}
-        ${field('Password', '<input name="password" type="password" maxlength="63" autocomplete="new-password">')}
-        <button type="submit">Save network</button>
-      </form>
-      <form method="post" action="/settings/wifi/reset" class="stack">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        ${field('Type reset to confirm', '<input name="confirm" autocomplete="off" required>')}
-        <button type="submit">Reset Wi-Fi</button>
-      </form>
+      ${wifiForms({
+        csrf,
+        scanAction: '/settings/wifi/scan',
+        saveAction: '/settings/wifi',
+        resetAction: '/settings/wifi/reset',
+        networks,
+        emptyText: 'Scan to list the networks the reader can see.',
+      })}
+      <h2>Actuator Wi-Fi</h2>
+      <p class="muted">${esc(`${wifiWhere(actuator, 'actuator')} Scan lists the networks at the lock. Choose one and enter its password. A wrong password leaves the actuator on the current network. Reset clears the saved network and starts Actuator-Setup for 10 minutes.`)}</p>
+      ${actuatorWifiError ? `<p class="flash bad">${esc(actuatorWifiError)}</p>` : ''}
+      ${wifiForms({
+        csrf,
+        scanAction: '/settings/actuator/wifi/scan',
+        saveAction: '/settings/actuator/wifi',
+        resetAction: '/settings/actuator/wifi/reset',
+        networks: actuatorNetworks,
+        emptyText: 'Scan to list the networks the actuator can see.',
+      })}
       <h2>Password</h2>
       <p class="muted">Signed in as ${esc(username)}. Changing the password signs out every other session.</p>
       ${passwordError ? `<p class="flash bad">${esc(passwordError)}</p>` : ''}

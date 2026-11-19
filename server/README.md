@@ -11,7 +11,7 @@ npm install
 npm test
 ```
 
-The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, password change and recovery, lockout, a simulated UID read, offline log upload, manual open, reader Wi-Fi changes, Telegram toggles, the CSV export, and the live WebSocket.
+The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, password change and recovery, lockout, a simulated UID read, offline log upload, manual open, reader and actuator Wi-Fi changes, Telegram toggles, the CSV export, and the live WebSocket.
 
 ## Configure
 
@@ -83,6 +83,12 @@ Settings sets how long the relay stays on, from 0.2 to 10 seconds. `DOOR_OPEN_MS
 Settings can ask the entrance reader to scan, then lists the networks it can see. Choose one and enter its password, or clear the saved network. The reader has to be online. Changing the network needs firmware 0.2.0 or newer. The scan list needs 0.3.0 or newer. The home Wi-Fi password is published once on `door/reader/wifi` and is not stored on the Pi. A wrong password leaves the reader on its current network.
 
 Reset starts a 10-minute `Door-Setup` network at the door. The page shows the password for that network and the address to open on a phone, `http://192.168.4.1`. Install the updated broker ACL before using this, or the reader is not allowed to subscribe to the command.
+
+## Actuator Wi-Fi
+
+Settings can do the same for the ESP-01 on the lock. Scan, choose a network, or clear the saved one. The actuator has to be online, on firmware 0.2.0 or newer. The home Wi-Fi password is published once on `door/actuator/wifi` and is not stored on the Pi. A wrong password leaves the actuator on its current network.
+
+Reset starts a 10-minute `Actuator-Setup` network at the lock, again at `http://192.168.4.1`. Install the updated broker ACL first, or the actuator is not allowed to subscribe to the command. Holding FLASH (GPIO0) for 3 seconds after the module is running opens the same page without clearing the current network. Do not hold FLASH while powering the module on.
 
 ## Try a read without hardware
 

@@ -862,6 +862,123 @@ test('settings can change how long the relay stays on', async () => {
   }
 });
 
+test('actuator wifi can be scanned, replaced, or reset from settings', async () => {
+  const ctx = await start();
+  try {
+    await enroll(ctx);
+    const status = {
+      schema: 1,
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      online: true,
+      ts: Math.floor(Date.now() / 1000),
+      fw: '0.1.0',
+      uptime_s: 12,
+      ip: '192.168.2.41',
+      rssi: -55,
+      ntp: true,
+      relay: 'off',
+      ssid: 'Lock Net',
+    };
+    ctx.door.handle('door/actuator/status', status);
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Actuator Wi-Fi/);
+    assert.match(html, /Lock Net/);
+    let res = await ctx.agent.post('/settings/actuator/wifi', {
+      _csrf: csrfOf(html),
+      ssid: 'Shed',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /Reflash the actuator/);
+    assert.equal(ctx.transport.messages.some((item) => item.topic === 'door/actuator/wifi'), false);
+
+    res = await ctx.agent.post('/settings/actuator/wifi/scan', { _csrf: csrfOf(html) });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /Reflash the actuator/);
+
+    status.fw = '0.2.0';
+    status.id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    ctx.door.handle('door/actuator/status', status);
+    html = await (await ctx.agent.fetch('/settings')).text();
+    res = await ctx.agent.post('/settings/actuator/wifi', {
+      _csrf: csrfOf(html),
+      other: '  Shed  ',
+      password: 'short',
+    });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /8 to 63 characters/);
+
+    res = await ctx.agent.post('/settings/actuator/wifi', {
+      _csrf: csrfOf(html),
+      other: '  Shed  ',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 303);
+    const sent = ctx.transport.messages.filter((item) => item.topic === 'door/actuator/wifi');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].payload.action, 'set');
+    assert.equal(sent[0].payload.ssid, 'Shed');
+    assert.equal(sent[0].payload.password, 'correct horse');
+    assert.equal(sent[0].opts.retain, false);
+    const switched = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(switched, /switching to Shed/);
+    assert.doesNotMatch(switched, /correct horse/);
+
+    res = await ctx.agent.post('/settings/actuator/wifi/reset', { _csrf: csrfOf(html), confirm: 'no' });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Type reset to clear the actuator/);
+
+    res = await ctx.agent.post('/settings/actuator/wifi/reset', { _csrf: csrfOf(html), confirm: 'reset' });
+    assert.equal(res.status, 303);
+    const reset = ctx.transport.messages.filter((item) => item.topic === 'door/actuator/wifi').at(-1);
+    assert.equal(reset.payload.action, 'forget');
+    assert.match(reset.payload.setup_password, /^[A-Z2-9]{10}$/);
+    assert.equal(reset.opts.retain, false);
+    const shown = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(shown, new RegExp(reset.payload.setup_password));
+    assert.match(shown, /Actuator-Setup/);
+    assert.match(shown, /192\.168\.4\.1/);
+
+    html = await (await ctx.agent.fetch('/settings')).text();
+    const posted = ctx.agent.post('/settings/actuator/wifi/scan', { _csrf: csrfOf(html) });
+    let scan;
+    for (let i = 0; i < 50 && !scan; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      scan = ctx.transport.messages.find((item) => item.topic === 'door/actuator/wifi' && item.payload.action === 'scan');
+    }
+    assert.ok(scan);
+    ctx.door.handle('door/actuator/status', {
+      ...status,
+      id: 'cccccccccccccccccccccccccccccccc',
+      fw: '0.2.0',
+      scan_id: scan.payload.id,
+      networks: [
+        { ssid: 'Shed', rssi: -42, secure: true },
+        { ssid: 'Cafe', rssi: -80, secure: false },
+      ],
+    });
+    res = await posted;
+    assert.equal(res.status, 303);
+    const page = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(page, /name="ssid" value="Shed"/);
+    assert.match(page, /name="ssid" value="Cafe"/);
+    const actuatorForm = page.split('Actuator Wi-Fi')[1] || '';
+    assert.match(actuatorForm, /value="Shed"/);
+    assert.doesNotMatch(actuatorForm.split('<h2>')[0], /value="Home"/);
+
+    ctx.transport.connected = false;
+    res = await ctx.agent.post('/settings/actuator/wifi', {
+      _csrf: csrfOf(page),
+      ssid: 'Other',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /broker is not connected/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('websocket snapshot requires the session', async () => {
   const ctx = await start();
   try {

@@ -35,6 +35,7 @@ Clients use a clean session, MQTT keepalive **60 seconds**, and QoS 1. The tools
 | `door/reader/wifi` | server | reader | **no** |
 | `door/reader/status` | reader | server | yes |
 | `door/actuator/open` | server, reader | actuator | **no** |
+| `door/actuator/wifi` | server | actuator | **no** |
 | `door/actuator/result` | actuator | server | no |
 | `door/actuator/status` | actuator | server | yes |
 
@@ -115,6 +116,8 @@ The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). Th
 ```
 
 `set` joins the new network and, if that fails, joins the previous one again. `forget` clears the saved network and starts an access point named `Door-Setup` for 10 minutes. A phone on that network opens `http://192.168.4.1`. `scan` asks the reader to look for networks. The next status includes `scan_id` (the command id) and `networks`, a list of `{ "ssid", "rssi", "secure" }`. That list is not kept in later heartbeats.
+
+The actuator uses the same three actions on `door/actuator/wifi`. A scan comes back on `door/actuator/status` the same way. Its setup network is named `Actuator-Setup`, at the same address, also for 10 minutes. A saved network on the ESP-01 replaces `WIFI_SSID` in `secrets.h`. That needs firmware 0.2.0 or newer. Actuator status includes `ssid`.
 
 **Last Will**, set before connect, QoS 1, retained, on that device’s status topic. The payload is exactly these bytes, with no spaces and no newline:
 
@@ -204,7 +207,7 @@ Actuator reasons: `opened`, `malformed`, `bad_mac`, `time_unsynced`, `replay`, `
 | User | May subscribe | May publish |
 |---|---|---|
 | `door-reader` | allowlist, feedback, wifi | uid, local, log, reader status, **and** `door/actuator/open` |
-| `door-actuator` | open | actuator status, result |
+| `door-actuator` | open, wifi | actuator status, result |
 | `door-server` | `door/#` | `door/#` |
 
 The reader may publish open commands so offline mode works. That password alone cannot forge one. The HMAC key is not on the wire.
