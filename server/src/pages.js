@@ -128,6 +128,7 @@ function totpPage({ csrf, qr, secret, error }) {
 
 function deviceCard(device) {
   const bits = [];
+  if (device.ssid) bits.push(device.ssid);
   if (device.ip) bits.push(device.ip);
   if (device.fw) bits.push(`firmware ${device.fw}`);
   if (device.rssi != null) bits.push(`${device.rssi} dBm`);
@@ -327,7 +328,15 @@ function logPage({ csrf, flash, rows, filters, page, pages, total }) {
   });
 }
 
-function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError }) {
+function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, wifiError, reader }) {
+  let where = 'The reader is offline.';
+  if (reader.online && reader.ssid) {
+    where = `The reader is on ${reader.ssid}${reader.ip ? ` at ${reader.ip}` : ''}.`;
+  } else if (reader.online) {
+    where = 'The reader is online and has not reported a network yet.';
+  } else if (reader.ssid) {
+    where = `The reader is offline. Last network was ${reader.ssid}.`;
+  }
   const box = (name, label) => `<label class="check"><input type="checkbox" name="${name}" value="1"${toggles[name] ? ' checked' : ''}> ${label}</label>`;
   return layout({
     title: 'Settings',
@@ -343,6 +352,20 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured, username, pass
         ${box('device', 'Device online or offline')}
         ${box('manual', 'Manual open')}
         <button type="submit">Save</button>
+      </form>
+      <h2>Reader Wi-Fi</h2>
+      <p class="muted">${esc(where)} Saving sends a new network to the reader. A wrong password leaves it on the current one. Reset clears the saved network and starts a temporary Door-Setup network at the door for 10 minutes. The home Wi-Fi password is not stored on the Pi.</p>
+      ${wifiError ? `<p class="flash bad">${esc(wifiError)}</p>` : ''}
+      <form method="post" action="/settings/wifi" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('Network name', '<input name="ssid" maxlength="32" autocomplete="off" required>')}
+        ${field('Password', '<input name="password" type="password" maxlength="63" autocomplete="new-password">')}
+        <button type="submit">Save network</button>
+      </form>
+      <form method="post" action="/settings/wifi/reset" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('Type reset to confirm', '<input name="confirm" autocomplete="off" required>')}
+        <button type="submit">Reset Wi-Fi</button>
       </form>
       <h2>Password</h2>
       <p class="muted">Signed in as ${esc(username)}. Changing the password signs out every other session.</p>

@@ -5,6 +5,7 @@
 user door-reader
 topic read door/reader/allowlist
 topic read door/reader/feedback
+topic read door/reader/wifi
 topic write door/reader/uid
 topic write door/reader/local
 topic write door/reader/log

@@ -10,6 +10,8 @@ from machine import PWM, Pin, SPI
 
 import pins
 import secrets
+import setup_ap
+import wifi_store
 from crypto_util import random_id
 from mfrc522 import MFRC522
 from mqtt_client import MqttClient
@@ -25,7 +27,7 @@ from policy import (
 from store import Store
 from ui import Ui
 
-FW = "0.1.0"
+FW = "0.2.0"
 CLIENT_ID = "door-reader"
 
 
@@ -33,6 +35,23 @@ def _int(value, default):
     if isinstance(value, bool) or not isinstance(value, int):
         return default
     return value
+
+
+def _printable(value):
+    for ch in value:
+        code = ord(ch)
+        if code < 32 or code == 127:
+            return False
+    return True
+
+
+def _setup_secret(value):
+    return (
+        isinstance(value, str)
+        and len(value) >= 8
+        and setup_ap.credentials_ok("setup", value)
+        and _printable(value)
+    )
 
 
 def open_ms():
@@ -102,6 +121,11 @@ class Reader:
             Pin(pins.RST, Pin.OUT, value=1),
         )
         self.boot = time.ticks_ms()
+        self.ssid, self.password = wifi_store.load(secrets)
+        self.wifi_cmd = None
+        self.setup_pin = Pin(pins.SETUP, Pin.IN, Pin.PULL_UP)
+        self.setup_hold = 0
+        self.setup_armed = True
         self.wifi_try = 0
         self.ntp_try = 0
         self.mqtt_try = 0
@@ -115,8 +139,12 @@ class Reader:
 
     def run(self):
         print("door reader", FW)
-        if not getattr(secrets, "WIFI_SSID", ""):
-            print("Set WIFI_SSID and WIFI_PASSWORD in secrets.py")
+        if not self.ssid:
+            print("no wifi saved")
+            try:
+                self._enter_setup(self._setup_ap_password())
+            except Exception as err:
+                print("setup", err)
         while True:
             try:
                 self._turn()
@@ -125,6 +153,8 @@ class Reader:
                 time.sleep_ms(200)
 
     def _turn(self):
+        self._take_wifi_cmd()
+        self._check_setup_button()
         self._ensure_wifi()
         self._ensure_ntp()
         self._ensure_mqtt()
@@ -144,25 +174,144 @@ class Reader:
     def _due(self, stamp, gap_ms):
         return time.ticks_diff(time.ticks_ms(), stamp) >= gap_ms
 
+    def _setup_ap_password(self):
+        value = getattr(secrets, "SETUP_AP_PASSWORD", "") or ""
+        if _setup_secret(value):
+            return value
+        return ""
+
+    def _join(self, timeout_ms):
+        if not self.ssid:
+            return False
+        self.mqtt.close()
+        try:
+            self.wlan.disconnect()
+        except OSError:
+            pass
+        try:
+            self.wlan.active(False)
+        except OSError:
+            pass
+        time.sleep_ms(100)
+        self.wlan.active(True)
+        time.sleep_ms(100)
+        try:
+            self.wlan.connect(self.ssid, self.password)
+        except OSError as err:
+            print("wifi", err)
+            return False
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            if self.wlan.isconnected():
+                return True
+            try:
+                status = self.wlan.status()
+            except OSError:
+                status = 1
+            if status in (-3, -2):
+                return False
+            time.sleep_ms(200)
+        return self.wlan.isconnected()
+
     def _ensure_wifi(self):
         self.wlan.active(True)
         if self.wlan.isconnected():
             return
         self.mqtt.close()
-        if not self._due(self.wifi_try, 3000):
+        if not self.ssid or not self._due(self.wifi_try, 3000):
             return
         self.wifi_try = time.ticks_ms()
-        if not secrets.WIFI_SSID:
-            return
-        self.wlan.active(True)
-        if not self.wlan.isconnected():
-            self.wlan.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
-            for _ in range(20):
-                if self.wlan.isconnected():
-                    break
-                time.sleep_ms(250)
-        if self.wlan.isconnected():
+        if self._join(5000):
             print("wifi", self.wlan.ifconfig()[0])
+
+    def _set_wifi(self, ssid, password):
+        previous = (self.ssid, self.password)
+        self.ssid = ssid
+        self.password = password
+        if self._join(20000):
+            wifi_store.save(ssid, password)
+            print("wifi", self.wlan.ifconfig()[0])
+            return
+        print("wifi rejected")
+        self.ssid, self.password = previous
+        if previous[0] and self._join(15000):
+            print("wifi", self.wlan.ifconfig()[0])
+
+    def _enter_setup(self, setup_password):
+        previous = (self.ssid, self.password)
+        self.mqtt.close()
+        try:
+            self.wlan.disconnect()
+        except OSError:
+            pass
+        started = time.ticks_ms()
+        notice = ""
+        joined = False
+        while time.ticks_diff(time.ticks_ms(), started) < 600000:
+            left = 600 - time.ticks_diff(time.ticks_ms(), started) // 1000
+            if left < 20:
+                break
+            chosen = setup_ap.serve(self.ui, left, setup_password, notice)
+            if not chosen:
+                break
+            self.ssid, self.password = chosen
+            if self._join(15000):
+                wifi_store.save(self.ssid, self.password)
+                print("wifi", self.wlan.ifconfig()[0])
+                joined = True
+                break
+            print("wifi rejected")
+            notice = "That network did not connect. Check the name and password."
+        self.ui.off()
+        if joined:
+            return
+        self.ssid, self.password = previous
+        if previous[0] and self._join(15000):
+            print("wifi", self.wlan.ifconfig()[0])
+            return
+        if not previous[0]:
+            wifi_store.save("", "")
+
+    def _take_wifi_cmd(self):
+        cmd = self.wifi_cmd
+        if cmd is None:
+            return
+        self.wifi_cmd = None
+        if not isinstance(cmd, dict) or cmd.get("schema") != 1:
+            return
+        action = cmd.get("action")
+        if action == "set":
+            ssid = cmd.get("ssid")
+            password = cmd.get("password")
+            if not isinstance(password, str):
+                password = ""
+            if setup_ap.credentials_ok(ssid, password):
+                self._set_wifi(ssid, password)
+            return
+        if action == "forget" and _setup_secret(cmd.get("setup_password")):
+            wifi_store.save("", "")
+            self.ssid = ""
+            self.password = ""
+            self._enter_setup(cmd.get("setup_password"))
+
+    def _check_setup_button(self):
+        held = self.setup_pin.value() == 0
+        if not held:
+            self.setup_hold = 0
+            self.setup_armed = True
+            return
+        if not self.setup_armed:
+            return
+        now = time.ticks_ms()
+        if self.setup_hold == 0:
+            self.setup_hold = now
+            return
+        if time.ticks_diff(now, self.setup_hold) < 3000:
+            return
+        self.setup_armed = False
+        self.setup_hold = 0
+        print("wifi setup button")
+        self._enter_setup(self._setup_ap_password())
 
     def _ensure_ntp(self):
         if self.clock.synced or not self.wlan.isconnected():
@@ -181,7 +330,11 @@ class Reader:
         self.mqtt_try = time.ticks_ms()
         try:
             self.mqtt.connect()
-            self.mqtt.subscribe(["door/reader/allowlist", "door/reader/feedback"])
+            self.mqtt.subscribe([
+                "door/reader/allowlist",
+                "door/reader/feedback",
+                "door/reader/wifi",
+            ])
             print("mqtt connected")
             self._publish_status()
             self.status_at = time.ticks_ms()
@@ -197,6 +350,9 @@ class Reader:
         if topic == "door/reader/allowlist":
             if self.store.accept_allowlist(message):
                 print("allowlist", self.store.version, len(self.store.entries))
+            return None
+        if topic == "door/reader/wifi" and isinstance(message, dict):
+            self.wifi_cmd = message
             return None
         if topic == "door/reader/feedback" and isinstance(message, dict):
             read_id = message.get("id")
@@ -374,6 +530,7 @@ class Reader:
             "fw": FW,
             "uptime_s": time.ticks_diff(time.ticks_ms(), self.boot) // 1000,
             "ip": ip,
+            "ssid": self.ssid if isinstance(self.ssid, str) else "",
             "rssi": rssi,
             "ntp": self.clock.synced,
             "allowlist_version": self.store.version,

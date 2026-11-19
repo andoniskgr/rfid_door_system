@@ -664,6 +664,98 @@ test('password change and recovery', async () => {
   }
 });
 
+test('reader wifi can be replaced or reset from settings', async () => {
+  const ctx = await start();
+  try {
+    await enroll(ctx);
+    const status = {
+      schema: 1,
+      id: '11111111111111111111111111111111',
+      online: true,
+      ts: Math.floor(Date.now() / 1000),
+      fw: '0.1.0',
+      uptime_s: 5,
+      ip: '192.168.2.40',
+      rssi: -60,
+      ntp: true,
+      allowlist_version: 1,
+      log_queued: 0,
+      ssid: 'Old Network',
+    };
+    ctx.door.handle('door/reader/status', status);
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Old Network/);
+    assert.match(html, /Reader Wi-Fi/);
+    let csrf = csrfOf(html);
+    let res = await ctx.agent.post('/settings/wifi', {
+      _csrf: csrf,
+      ssid: 'New Network',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /Reflash the reader/);
+    assert.equal(ctx.transport.messages.some((item) => item.topic === 'door/reader/wifi'), false);
+
+    status.fw = '0.2.0';
+    ctx.door.handle('door/reader/status', status);
+    const live = await (await ctx.agent.fetch('/')).text();
+    assert.match(live, /Old Network/);
+    html = await (await ctx.agent.fetch('/settings')).text();
+    csrf = csrfOf(html);
+    res = await ctx.agent.post('/settings/wifi', {
+      _csrf: csrf,
+      ssid: '  New Network  ',
+      password: 'short',
+    });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /8 to 63 characters/);
+
+    res = await ctx.agent.post('/settings/wifi', {
+      _csrf: csrf,
+      ssid: '  New Network  ',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 303);
+    const sent = ctx.transport.messages.filter((item) => item.topic === 'door/reader/wifi');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].payload.action, 'set');
+    assert.equal(sent[0].payload.ssid, 'New Network');
+    assert.equal(sent[0].payload.password, 'correct horse');
+    assert.equal(sent[0].payload.schema, 1);
+    assert.equal(sent[0].opts.retain, false);
+    const switched = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(switched, /switching to New Network/);
+    assert.doesNotMatch(switched, /correct horse/);
+
+    res = await ctx.agent.post('/settings/wifi/reset', { _csrf: csrf, confirm: 'no' });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Type reset/);
+
+    res = await ctx.agent.post('/settings/wifi/reset', { _csrf: csrf, confirm: 'reset' });
+    assert.equal(res.status, 303);
+    const reset = ctx.transport.messages.filter((item) => item.topic === 'door/reader/wifi').at(-1);
+    assert.equal(reset.payload.action, 'forget');
+    assert.match(reset.payload.setup_password, /^[A-Z2-9]{10}$/);
+    assert.equal(reset.opts.retain, false);
+    assert.equal(reset.payload.password, undefined);
+    const shown = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(shown, new RegExp(reset.payload.setup_password));
+    assert.match(shown, /Door-Setup/);
+    assert.match(shown, /192\.168\.4\.1/);
+
+    ctx.transport.connected = false;
+    res = await ctx.agent.post('/settings/wifi', {
+      _csrf: csrf,
+      ssid: 'Other',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /broker is not connected/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('websocket snapshot requires the session', async () => {
   const ctx = await start();
   try {

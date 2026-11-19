@@ -12,7 +12,7 @@ const dbApi = require('./db');
 const { SqliteSessionStore } = require('./session-store');
 const { sessionFromRequest } = require('./cookies');
 const { buildSchedule, cleanName, expiryFromDate, startOfLocalDay } = require('./schedule');
-const { presentEvent, presentTag, REASON_LABEL } = require('./present');
+const { presentDevice, presentEvent, presentTag, REASON_LABEL } = require('./present');
 const { formatIso } = require('./timeutil');
 const { TOGGLES } = require('./telegram');
 const pages = require('./pages');
@@ -341,6 +341,40 @@ function createApp({ db, config, door }) {
     res.redirect(303, '/settings');
   });
 
+  app.post('/settings/wifi', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    try {
+      const saved = await door.setReaderWifi(req.body.ssid, typeof req.body.password === 'string' ? req.body.password : '');
+      req.session.flash = {
+        type: 'ok',
+        text: `The reader is switching to ${saved.ssid}. If that network does not accept it, the reader stays on the current one.`,
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { wifiError: err.message }));
+    }
+  }));
+
+  app.post('/settings/wifi/reset', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    if (req.body.confirm !== 'reset') {
+      res.status(400).type('html').send(settingsView(req, { wifiError: 'Type reset to clear the reader\'s Wi-Fi.' }));
+      return;
+    }
+    try {
+      const saved = await door.forgetReaderWifi();
+      req.session.flash = {
+        type: 'ok',
+        text: `The reader cleared its network and will broadcast Door-Setup for 10 minutes. Join that network with password ${saved.setupPassword}, open http://192.168.4.1, and enter the new Wi-Fi. Then reconnect this browser to the home network.`,
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { wifiError: err.message }));
+    }
+  }));
+
   app.post('/settings/password', requireAdmin, requireCsrf, asyncRoute(async (req, res, next) => {
     const shape = auth.checkPasswordShape(req.body.password, req.body.password2);
     if (shape) {
@@ -376,6 +410,7 @@ function createApp({ db, config, door }) {
   function settingsView(req, extra = {}) {
     const toggles = {};
     for (const [name, key] of Object.entries(TOGGLES)) toggles[name] = dbApi.getSetting(db, key) === '1';
+    const row = dbApi.getDevice(db, 'reader');
     return pages.settingsPage({
       csrf: req.session.csrf,
       flash: extra.flash,
@@ -383,6 +418,8 @@ function createApp({ db, config, door }) {
       telegramConfigured: Boolean(config.telegramToken),
       username: req.session.adminUser,
       passwordError: extra.passwordError,
+      wifiError: extra.wifiError,
+      reader: presentDevice(row, config.tz),
     });
   }
 
@@ -596,6 +633,13 @@ function regenerate(req, fields, done) {
     req.session.csrf = crypto.randomBytes(32).toString('hex');
     req.session.save(done);
   });
+}
+
+function wifiStatus(err) {
+  if (!err) return 0;
+  if (err.code === 'BAD_WIFI') return 400;
+  if (err.code === 'NO_MQTT' || err.code === 'OFFLINE' || err.code === 'OLD_FW') return 409;
+  return 0;
 }
 
 function takeFlash(req) {

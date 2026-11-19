@@ -54,6 +54,7 @@ function presentDevice(row, timeZone) {
     lastSeen: row.last_seen ? formatTs(row.last_seen, timeZone) : 'No heartbeat yet',
     fw: payload.fw || '',
     ip: payload.ip || '',
+    ssid: typeof payload.ssid === 'string' ? payload.ssid.slice(0, 32) : '',
     rssi: Number.isInteger(payload.rssi) ? payload.rssi : null,
     allowlist: Number.isInteger(payload.allowlist_version) ? payload.allowlist_version : null,
     relay: payload.relay || '',

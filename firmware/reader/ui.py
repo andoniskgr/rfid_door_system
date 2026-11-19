@@ -30,6 +30,11 @@ class Ui:
         self.red.value(_level(False))
         self._quiet()
 
+    def set_both(self, on):
+        level = _level(on)
+        self.green.value(level)
+        self.red.value(level)
+
     def show(self, granted):
         led = self.green if granted else self.red
         led.value(_level(True))

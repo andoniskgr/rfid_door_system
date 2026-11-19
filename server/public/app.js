@@ -14,6 +14,7 @@
 
   function deviceCard(device) {
     const bits = [];
+    if (device.ssid) bits.push(device.ssid);
     if (device.ip) bits.push(device.ip);
     if (device.fw) bits.push('firmware ' + device.fw);
     if (device.rssi != null) bits.push(device.rssi + ' dBm');

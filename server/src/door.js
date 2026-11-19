@@ -350,6 +350,107 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return cmd;
   }
 
+  function cleanSsid(value) {
+    if (typeof value !== 'string') return null;
+    const ssid = value.trim();
+    const chars = [...ssid];
+    if (chars.length < 1 || chars.length > 32 || Buffer.byteLength(ssid) > 32) return null;
+    if (chars.some((ch) => {
+      const code = ch.codePointAt(0);
+      return code < 32 || code === 127;
+    })) return null;
+    return ssid;
+  }
+
+  function cleanPassword(value) {
+    if (typeof value !== 'string') return null;
+    if (value.length === 0) return '';
+    const chars = [...value];
+    if (chars.length < 8 || chars.length > 63 || Buffer.byteLength(value) > 63) return null;
+    if (chars.some((ch) => {
+      const code = ch.codePointAt(0);
+      return code < 32 || code === 127;
+    })) return null;
+    return value;
+  }
+
+  function readerState() {
+    const row = dbApi.getDevice(db, 'reader');
+    let payload = {};
+    if (row && row.payload) {
+      try { payload = JSON.parse(row.payload); } catch { payload = {}; }
+    }
+    const fw = typeof payload.fw === 'string' ? payload.fw : '';
+    return { online: Boolean(row && row.online), fw };
+  }
+
+  function firmwareCanSetWifi(fw) {
+    const nums = String(fw).split('.').map((part) => Number(part));
+    if (nums.length < 2 || nums.some((part) => !Number.isInteger(part))) return false;
+    return nums[0] > 0 || nums[1] >= 2;
+  }
+
+  function requireReader() {
+    if (!transport.connected) {
+      const err = new Error('The broker is not connected.');
+      err.code = 'NO_MQTT';
+      throw err;
+    }
+    const reader = readerState();
+    if (!reader.online) {
+      const err = new Error('The reader is offline, so it cannot take a new network. Hold the setup button at the door, or power-cycle the reader if it has no saved network.');
+      err.code = 'OFFLINE';
+      throw err;
+    }
+    if (!firmwareCanSetWifi(reader.fw)) {
+      const shown = reader.fw || 'an older version';
+      const err = new Error(`Reflash the reader before changing Wi-Fi. This one is still on firmware ${shown}.`);
+      err.code = 'OLD_FW';
+      throw err;
+    }
+  }
+
+  function makeSetupPassword() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = crypto.randomBytes(10);
+    let out = '';
+    for (const byte of bytes) out += alphabet[byte % alphabet.length];
+    return out;
+  }
+
+  async function setReaderWifi(ssid, password) {
+    const name = cleanSsid(ssid);
+    const secret = cleanPassword(password);
+    if (!name || secret === null) {
+      const err = new Error('A Wi-Fi password needs 8 to 63 characters. Leave it empty only for an open network.');
+      err.code = 'BAD_WIFI';
+      throw err;
+    }
+    requireReader();
+    await publish('door/reader/wifi', {
+      schema: 1,
+      id: randomId(),
+      ts: now(),
+      action: 'set',
+      ssid: name,
+      password: secret,
+    }, false);
+    return { ssid: name };
+  }
+
+  async function forgetReaderWifi() {
+    requireReader();
+    const setupPassword = makeSetupPassword();
+    await publish('door/reader/wifi', {
+      schema: 1,
+      id: randomId(),
+      ts: now(),
+      action: 'forget',
+      setup_password: setupPassword,
+    }, false);
+    return { setupPassword };
+  }
+
   function snapshot() {
     return {
       type: 'snapshot',
@@ -359,7 +460,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     };
   }
 
-  return { handle, sweep, publishAllowlist, openNow, snapshot };
+  return { handle, sweep, publishAllowlist, openNow, setReaderWifi, forgetReaderWifi, snapshot };
 }
 
 module.exports = { createDoor, randomId };

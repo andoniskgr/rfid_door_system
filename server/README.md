@@ -11,7 +11,7 @@ npm install
 npm test
 ```
 
-The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, password change and recovery, lockout, a simulated UID read, offline log upload, manual open, Telegram toggles, the CSV export, and the live WebSocket.
+The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, password change and recovery, lockout, a simulated UID read, offline log upload, manual open, reader Wi-Fi changes, Telegram toggles, the CSV export, and the live WebSocket.
 
 ## Configure
 
@@ -73,6 +73,12 @@ ss -ltnp | grep 3000
 It should show `127.0.0.1:3000`.
 
 A database backup is written to `data/backups/` once a day, the first time the process is running after 03:00 in `TZ`. Fourteen copies are kept. The allowlist is published again after 03:05, and also whenever tags change or the UTC offset changes.
+
+## Reader Wi-Fi
+
+Settings can send the entrance reader a new network, or clear the saved one. The reader has to be online and on firmware 0.2.0 or newer. The home Wi-Fi password is published once on `door/reader/wifi` and is not stored on the Pi. A wrong password leaves the reader on its current network.
+
+Reset starts a 10-minute `Door-Setup` network at the door. The page shows the password for that network and the address to open on a phone, `http://192.168.4.1`. Install the updated broker ACL before using this, or the reader is not allowed to subscribe to the command.
 
 ## Try a read without hardware
 

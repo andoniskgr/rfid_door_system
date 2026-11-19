@@ -32,6 +32,7 @@ Clients use a clean session, MQTT keepalive **60 seconds**, and QoS 1. The tools
 | `door/reader/local` | reader | server | no |
 | `door/reader/log` | reader | server | no |
 | `door/reader/allowlist` | server | reader | yes |
+| `door/reader/wifi` | server | reader | **no** |
 | `door/reader/status` | reader | server | yes |
 | `door/actuator/open` | server, reader | actuator | **no** |
 | `door/actuator/result` | actuator | server | no |
@@ -101,7 +102,19 @@ Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time.
 
 The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). The server attaches `result.reason` when a result with that id arrives.
 
-**Status**, retained, every 30 seconds. Reader example adds `allowlist_version` and `log_queued`. Actuator example adds `relay` as `off` or `on`.
+**Status**, retained, every 30 seconds. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. Actuator example adds `relay` as `off` or `on`.
+
+**Wi-Fi** `door/reader/wifi`, not retained. The server publishes it and the reader subscribes. The password crosses the LAN once and is not stored on the broker or the Pi. `ssid` is 1–32 characters. `password` is empty for an open network, or 8–63 characters. `setup_password` is 8–63 characters.
+
+```json
+{ "schema": 1, "id": "<32 hex>", "ts": 1794582240, "action": "set", "ssid": "home", "password": "secret" }
+```
+
+```json
+{ "schema": 1, "id": "<32 hex>", "ts": 1794582240, "action": "forget", "setup_password": "ABCD234567" }
+```
+
+`set` joins the new network and, if that fails, joins the previous one again. `forget` clears the saved network and starts an access point named `Door-Setup` for 10 minutes. A phone on that network opens `http://192.168.4.1`.
 
 **Last Will**, set before connect, QoS 1, retained, on that device’s status topic. The payload is exactly these bytes, with no spaces and no newline:
 
@@ -190,7 +203,7 @@ Actuator reasons: `opened`, `malformed`, `bad_mac`, `time_unsynced`, `replay`, `
 
 | User | May subscribe | May publish |
 |---|---|---|
-| `door-reader` | allowlist, feedback | uid, local, log, reader status, **and** `door/actuator/open` |
+| `door-reader` | allowlist, feedback, wifi | uid, local, log, reader status, **and** `door/actuator/open` |
 | `door-actuator` | open | actuator status, result |
 | `door-server` | `door/#` | `door/#` |
 
