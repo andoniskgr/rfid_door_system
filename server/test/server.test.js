@@ -979,6 +979,52 @@ test('actuator wifi can be scanned, replaced, or reset from settings', async () 
   }
 });
 
+test('settings shows the reader battery from status', async () => {
+  const ctx = await start();
+  try {
+    await enroll(ctx);
+    ctx.door.handle('door/reader/status', {
+      schema: 1,
+      id: '11111111111111111111111111111111',
+      online: true,
+      ts: Math.floor(Date.now() / 1000),
+      fw: '0.4.0',
+      uptime_s: 5,
+      ip: '192.168.2.40',
+      rssi: -60,
+      ntp: true,
+      allowlist_version: 1,
+      log_queued: 0,
+      power: 'battery',
+      battery_mv: 3920,
+      battery_pct: 70,
+    });
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Reader battery/);
+    assert.match(html, /70%/);
+    assert.match(html, /3\.92 V/);
+
+    const live = await (await ctx.agent.fetch('/')).text();
+    assert.match(live, /battery 70%/);
+
+    ctx.door.handle('door/reader/status', {
+      schema: 1,
+      id: '22222222222222222222222222222222',
+      online: true,
+      ts: Math.floor(Date.now() / 1000),
+      fw: '0.4.0',
+      power: 'usb',
+      battery_mv: 3920,
+      battery_pct: 70,
+    });
+    html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Running from USB/);
+    assert.doesNotMatch(html, /70%/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('websocket snapshot requires the session', async () => {
   const ctx = await start();
   try {

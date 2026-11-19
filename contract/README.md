@@ -103,7 +103,7 @@ Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time.
 
 The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). The server attaches `result.reason` when a result with that id arrives.
 
-**Status**, retained, every 30 seconds. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. Actuator example adds `relay` as `off` or `on`.
+**Status**, retained, every 30 seconds. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. It also adds `power` as `battery`, `usb`, or `unknown`. On battery it adds `battery_mv` (cell millivolts, diode drop included) and `battery_pct` from 0 to 100. Those two are omitted on USB, because VSYS is then the USB rail and the cell is hidden. Actuator example adds `relay` as `off` or `on`.
 
 **Wi-Fi** `door/reader/wifi`, not retained. The server publishes it and the reader subscribes. The password crosses the LAN once and is not stored on the broker or the Pi. `ssid` is 1–32 characters. `password` is empty for an open network, or 8–63 characters. `setup_password` is 8–63 characters.
 

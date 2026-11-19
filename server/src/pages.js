@@ -132,6 +132,8 @@ function deviceCard(device) {
   if (device.ip) bits.push(device.ip);
   if (device.fw) bits.push(`firmware ${device.fw}`);
   if (device.rssi != null) bits.push(`${device.rssi} dBm`);
+  if (device.power === 'usb') bits.push('USB power');
+  else if (device.power === 'battery' && device.batteryPct != null) bits.push(`battery ${device.batteryPct}%`);
   if (device.allowlist != null) bits.push(`allowlist ${device.allowlist}`);
   if (device.relay) bits.push(`relay ${device.relay}`);
   if (device.logQueued) bits.push(`${device.logQueued} logs queued`);
@@ -365,6 +367,30 @@ function wifiForms({ csrf, scanAction, saveAction, resetAction, networks, emptyT
       </form>`;
 }
 
+function readerPower(reader) {
+  const volts = reader.batteryMv != null ? `${(reader.batteryMv / 1000).toFixed(2)} V` : '';
+  let state;
+  let meter = '';
+  if (reader.power === 'usb') {
+    state = 'Running from USB. The 18650 voltage is hidden until that cable is unplugged. The Pico USB port does not charge the cell.';
+  } else if (reader.power === 'battery' && reader.batteryPct != null) {
+    const tone = reader.batteryPct <= 15 ? 'bad' : 'ok';
+    const level = `${reader.batteryPct}%${volts ? ` · ${volts}` : ''}`;
+    state = `<span class="${tone}">${esc(level)}</span>${reader.online ? '' : ' when it last reported.'}`;
+    meter = `<div class="meter${reader.batteryPct <= 15 ? ' low' : ''}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${reader.batteryPct}"><span style="width:${reader.batteryPct}%"></span></div>`;
+  } else if (reader.power === 'battery') {
+    state = 'The reader is on battery but did not send a level.';
+  } else if (reader.power === 'unknown') {
+    state = 'The reader could not measure the supply voltage.';
+  } else {
+    state = 'No battery report yet. Copy battery.py and the updated main.py to the Pico, then reset it. The level shows up on the next heartbeat.';
+  }
+  return `<h2>Reader battery</h2>
+      <p>${state}</p>
+      ${meter}
+      <p class="muted">One protected 18650 feeds VSYS through a Schottky diode. Full is about 4.2 V and empty about 3.2 V. Charge the cell from a TP4056, not from the Pico USB port.</p>`;
+}
+
 function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, doorError, openSeconds, wifiError, actuatorWifiError, reader, actuator = { online: false, ssid: '', ip: '' }, networks = [], actuatorNetworks = [] }) {
   const box = (name, label) => `<label class="check"><input type="checkbox" name="${name}" value="1"${toggles[name] ? ' checked' : ''}> ${label}</label>`;
   return layout({
@@ -390,6 +416,7 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured, username, pass
         ${field('Open time (seconds)', `<input name="seconds" type="number" min="0.2" max="10" step="0.1" inputmode="decimal" required value="${esc(openSeconds)}">`)}
         <button type="submit">Save open time</button>
       </form>
+      ${readerPower(reader)}
       <h2>Reader Wi-Fi</h2>
       <p class="muted">${esc(`${wifiWhere(reader, 'reader')} Scan lists the networks at the door. Choose one and enter its password. A wrong password leaves the reader on the current network. Reset clears the saved network and starts Door-Setup for 10 minutes.`)}</p>
       ${wifiError ? `<p class="flash bad">${esc(wifiError)}</p>` : ''}

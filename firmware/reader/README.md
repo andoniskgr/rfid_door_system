@@ -22,6 +22,29 @@ The RC522 uses 3.3 V, not 5 V.
 
 The LEDs and the buzzer are active high. GP18 is driven with a tone, so a passive piezo or an active buzzer both make a sound.
 
+## Battery
+
+One protected 18650 powers the reader. The cell’s 3.0–4.2 V range fits VSYS (1.8–5.5 V). The lock stays on the actuator supply. This cell does not feed the relay.
+
+Use a cell with its own protection board, a TP4056 charger, and a 1N5819 Schottky diode. The banded end of the diode points at the Pico.
+
+```text
+18650 +  ---- TP4056 B+
+18650 -  ---- TP4056 B-
+TP4056 OUT+ ---- diode ---- Pico VSYS (pin 39)
+TP4056 OUT- -------------- Pico GND
+```
+
+Charge only from the TP4056 USB socket, with a 5 V phone charger. The Pico’s own USB port is for programming. While that cable is plugged in, the reader runs from USB and Settings shows “Running from USB” instead of a percentage. Unplug it to see the cell.
+
+Do not tie the cell to 3V3 or to VBUS. 3V3 is a regulator output. VBUS is 5 V from USB, and a direct connection there would put 5 V across the cell. Do not use an unprotected cell, a second cell in series, or a 2S pack. VSYS must stay at or below 5.5 V.
+
+`DIODE_MV` in `battery.py` is 300, the typical drop of a 1N5819 at this current. Compare Settings with a meter on the cell. If Settings reads high by about 0.3 V, set `DIODE_MV` to 0. Each heartbeat reads VSYS, adds that drop, and maps the result onto a light-load 18650 curve. Full is about 4.2 V. Empty is about 3.2 V. A charging cell reads high until the charger is unplugged.
+
+A reader that stays on Wi-Fi draws roughly 70–100 mA with the RC522. A healthy 2500 mAh cell lasts about a day. The protection board cuts the cell off near 2.5 V. Recharge before the level sits at 15%, because a cutoff needs Wi-Fi and NTP again before the next offline decision.
+
+Firmware `0.4.0` publishes `power`, and on battery also `battery_mv` and `battery_pct`, in the retained status. Settings shows that on the next heartbeat.
+
 ## Flash
 
 Install the Pico W MicroPython UF2 if the board does not already have it. Copy every `.py` file in this folder except `check_policy.py` and `secrets.example.py` onto the Pico. `secrets.py` is the one that must be edited first: set `WIFI_SSID` and `WIFI_PASSWORD`. That pair is only the first network. After the reader is online, change it from the server Settings page. The MQTT password and both HMAC keys in that file match the Pi. `MQTT_HOST` is the Pi's LAN address, `192.168.2.31`.
@@ -30,11 +53,11 @@ From this folder, with the Pico plugged into USB:
 
 ```bash
 python3 check_policy.py
-mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py wifi_store.py setup_ap.py ui.py secrets.py main.py :
+mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py wifi_store.py setup_ap.py ui.py battery.py secrets.py main.py :
 mpremote reset
 ```
 
-Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
+Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. Firmware `0.4.0` adds the 18650 level. Use a Pico W MicroPython build from 2023 or later so `ADC(3)` can read VSYS without dropping Wi-Fi. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
 
 Reload Mosquitto after installing the ACL in `contract/mosquitto/acl`. The reader has to be allowed to subscribe to `door/reader/wifi`, or the Settings page can send a network the Pico never receives.
 

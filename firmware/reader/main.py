@@ -8,6 +8,7 @@ import network
 import ntptime
 from machine import PWM, Pin, SPI
 
+import battery
 import pins
 import secrets
 import setup_ap
@@ -27,7 +28,7 @@ from policy import (
 from store import Store
 from ui import Ui
 
-FW = "0.3.0"
+FW = "0.4.0"
 CLIENT_ID = "door-reader"
 
 
@@ -550,6 +551,12 @@ class Reader:
             "allowlist_version": self.store.version,
             "log_queued": len(self.store.entries_log),
         }
+        sample = battery.read()
+        body["power"] = sample.get("power", "unknown")
+        if isinstance(sample.get("battery_mv"), int):
+            body["battery_mv"] = sample["battery_mv"]
+        if isinstance(sample.get("battery_pct"), int):
+            body["battery_pct"] = sample["battery_pct"]
         report = self.scan_report
         if isinstance(report, dict):
             body["scan_id"] = report.get("id")
