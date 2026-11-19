@@ -87,6 +87,7 @@ th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var
 .ok { color: var(--ok); font-weight: 600; }
 .bad { color: var(--bad); font-weight: 600; }
 .muted { color: var(--muted); }
+.muted a { color: inherit; }
 .flash { padding: 0.6rem 0.75rem; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
 .qr { width: 220px; height: 220px; background: white; }
 .secret code { word-break: break-all; }

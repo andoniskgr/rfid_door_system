@@ -48,11 +48,12 @@ function field(label, inner) {
   return `<label class="field"><span>${label}</span>${inner}</label>`;
 }
 
-function loginPage({ csrf, error }) {
+function loginPage({ csrf, error, notice }) {
   return layout({
     title: 'Log in',
     csrf,
     body: `<h1>Log in</h1>
+      ${notice ? `<p class="flash ok">${esc(notice)}</p>` : ''}
       ${error ? `<p class="flash bad">${esc(error)}</p>` : ''}
       <form method="post" action="/login" class="stack">
         <input type="hidden" name="_csrf" value="${esc(csrf)}">
@@ -60,7 +61,26 @@ function loginPage({ csrf, error }) {
         ${field('Password', '<input name="password" type="password" autocomplete="current-password" required>')}
         ${field('Authentication code', '<input name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" required>')}
         <button type="submit">Log in</button>
-      </form>`,
+      </form>
+      <p class="muted"><a href="/recover">Forgot the password?</a></p>`,
+  });
+}
+
+function recoverPage({ csrf, error }) {
+  return layout({
+    title: 'Recover password',
+    csrf,
+    body: `<h1>Recover the password</h1>
+      <p>Enter a new password and the authenticator code. Every session is signed out.</p>
+      ${error ? `<p class="flash bad">${esc(error)}</p>` : ''}
+      <form method="post" action="/recover" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('New password', '<input name="password" type="password" autocomplete="new-password" required minlength="12">')}
+        ${field('New password again', '<input name="password2" type="password" autocomplete="new-password" required minlength="12">')}
+        ${field('Authentication code', '<input name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" required>')}
+        <button type="submit">Set a new password</button>
+      </form>
+      <p class="muted"><a href="/login">Back to log in</a></p>`,
   });
 }
 
@@ -307,7 +327,7 @@ function logPage({ csrf, flash, rows, filters, page, pages, total }) {
   });
 }
 
-function settingsPage({ csrf, flash, toggles, telegramConfigured }) {
+function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError }) {
   const box = (name, label) => `<label class="check"><input type="checkbox" name="${name}" value="1"${toggles[name] ? ' checked' : ''}> ${label}</label>`;
   return layout({
     title: 'Settings',
@@ -323,6 +343,17 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured }) {
         ${box('device', 'Device online or offline')}
         ${box('manual', 'Manual open')}
         <button type="submit">Save</button>
+      </form>
+      <h2>Password</h2>
+      <p class="muted">Signed in as ${esc(username)}. Changing the password signs out every other session.</p>
+      ${passwordError ? `<p class="flash bad">${esc(passwordError)}</p>` : ''}
+      <form method="post" action="/settings/password" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        ${field('Current password', '<input name="current" type="password" autocomplete="current-password" required>')}
+        ${field('New password', '<input name="password" type="password" autocomplete="new-password" required minlength="12">')}
+        ${field('New password again', '<input name="password2" type="password" autocomplete="new-password" required minlength="12">')}
+        ${field('Authentication code', '<input name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" required>')}
+        <button type="submit">Change password</button>
       </form>`,
   });
 }
@@ -331,6 +362,7 @@ module.exports = {
   esc,
   layout,
   loginPage,
+  recoverPage,
   setupPage,
   totpPage,
   livePage,

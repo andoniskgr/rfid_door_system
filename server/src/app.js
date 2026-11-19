@@ -132,7 +132,8 @@ function createApp({ db, config, door }) {
   app.get('/login', (req, res) => {
     if (req.session.totpOk) return res.redirect('/');
     if (req.session.admin && !dbApi.getAdmin(db)?.totp_confirmed) return res.redirect('/setup/totp');
-    res.type('html').send(pages.loginPage({ csrf: req.session.csrf }));
+    const notice = req.query.reset === '1' ? 'Password updated. Log in with the new password.' : '';
+    res.type('html').send(pages.loginPage({ csrf: req.session.csrf, notice }));
   });
 
   app.post('/login', requireCsrf, asyncRoute(async (req, res) => {
@@ -149,6 +150,30 @@ function createApp({ db, config, door }) {
     }
     regenerate(req, { admin: true, adminUser: result.username, totpOk: true }, () => {
       res.redirect(303, '/');
+    });
+  }));
+
+  app.get('/recover', (req, res) => {
+    const admin = dbApi.getAdmin(db);
+    if (!admin || !admin.totp_confirmed) return res.redirect('/setup');
+    res.type('html').send(pages.recoverPage({ csrf: req.session.csrf }));
+  });
+
+  app.post('/recover', requireCsrf, asyncRoute(async (req, res) => {
+    const now = nowSec();
+    const ip = clientIp(req);
+    const shape = auth.checkPasswordShape(req.body.password, req.body.password2);
+    if (shape) return sendRecover(req, res, shape);
+    const result = await auth.recoverPassword(db, config, {
+      password: req.body.password,
+      totp: req.body.totp,
+      ip,
+      nowSec: now,
+    });
+    if (!result.ok) return sendRecover(req, res, result.error, result.status);
+    req.session.destroy(() => {
+      res.clearCookie('door_sid');
+      res.redirect(303, '/login?reset=1');
     });
   }));
 
@@ -304,15 +329,8 @@ function createApp({ db, config, door }) {
   });
 
   app.get('/settings', requireAdmin, (req, res) => {
-    const toggles = {};
-    for (const [name, key] of Object.entries(TOGGLES)) toggles[name] = dbApi.getSetting(db, key) === '1';
     res.setHeader('Cache-Control', 'no-store');
-    res.type('html').send(pages.settingsPage({
-      csrf: req.session.csrf,
-      flash: takeFlash(req),
-      toggles,
-      telegramConfigured: Boolean(config.telegramToken),
-    }));
+    res.type('html').send(settingsView(req, { flash: takeFlash(req) }));
   });
 
   app.post('/settings', requireAdmin, requireCsrf, (req, res) => {
@@ -323,12 +341,50 @@ function createApp({ db, config, door }) {
     res.redirect(303, '/settings');
   });
 
+  app.post('/settings/password', requireAdmin, requireCsrf, asyncRoute(async (req, res, next) => {
+    const shape = auth.checkPasswordShape(req.body.password, req.body.password2);
+    if (shape) {
+      res.status(401).type('html').send(settingsView(req, { passwordError: shape }));
+      return;
+    }
+    const username = req.session.adminUser;
+    const result = await auth.changePassword(db, config, {
+      currentPassword: req.body.current,
+      nextPassword: req.body.password,
+      totp: req.body.totp,
+      ip: clientIp(req),
+      nowSec: nowSec(),
+    });
+    if (!result.ok) {
+      res.status(result.status).type('html').send(settingsView(req, { passwordError: result.error }));
+      return;
+    }
+    regenerate(req, { admin: true, adminUser: username, totpOk: true }, (err) => {
+      if (err) return next(err);
+      req.session.flash = { type: 'ok', text: 'Password updated. Other sessions were signed out.' };
+      req.session.save(() => res.redirect(303, '/settings'));
+    });
+  }));
+
   app.use((req, res) => res.status(404).type('text').send('Not found'));
   app.use((err, req, res, next) => {
     console.error(err);
     if (res.headersSent) return next(err);
     res.status(500).type('text').send('Something went wrong.');
   });
+
+  function settingsView(req, extra = {}) {
+    const toggles = {};
+    for (const [name, key] of Object.entries(TOGGLES)) toggles[name] = dbApi.getSetting(db, key) === '1';
+    return pages.settingsPage({
+      csrf: req.session.csrf,
+      flash: extra.flash,
+      toggles,
+      telegramConfigured: Boolean(config.telegramToken),
+      username: req.session.adminUser,
+      passwordError: extra.passwordError,
+    });
+  }
 
   function readFilters(req) {
     const reason = typeof req.query.reason === 'string' && REASON_LABEL[req.query.reason] ? req.query.reason : '';
@@ -550,6 +606,10 @@ function takeFlash(req) {
 
 function sendSetup(req, res, mode, error) {
   res.status(401).type('html').send(pages.setupPage({ csrf: req.session.csrf, mode, error }));
+}
+
+function sendRecover(req, res, error, status = 401) {
+  res.status(status).type('html').send(pages.recoverPage({ csrf: req.session.csrf, error }));
 }
 
 async function renderTotpError(req, res, admin, error) {

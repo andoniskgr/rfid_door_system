@@ -174,6 +174,16 @@ async function enroll(ctx) {
   assert.equal(res.status, 303, await textOf(res));
 }
 
+async function loginWith(ctx, agent, password) {
+  const html = await (await agent.fetch('/login')).text();
+  return agent.post('/login', {
+    _csrf: csrfOf(html),
+    username: 'ada',
+    password,
+    totp: totpCode(getAdmin(ctx.db).totp_secret),
+  });
+}
+
 async function textOf(res) {
   try { return await res.clone().text(); } catch { return ''; }
 }
@@ -545,6 +555,110 @@ test('the log filters, paginates, and exports csv', async () => {
     const csv = await csvRes.text();
     assert.match(csv, /timestamp,uid,owner,granted,reason/);
     assert.equal(csv.trim().split('\n').length, 53);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('password change and recovery', async () => {
+  const ctx = await start();
+  try {
+    const early = await ctx.agent.fetch('/recover');
+    assert.equal(early.status, 302);
+    assert.equal(early.headers.get('location'), '/setup');
+
+    await enroll(ctx);
+    const other = new Agent(ctx.agent.base);
+    let res = await other.post('/login', {
+      _csrf: csrfOf(await (await other.fetch('/login')).text()),
+      username: 'ada',
+      password: 'correct horse battery',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 303);
+
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Change password/);
+    assert.match(html, /Signed in as ada/);
+    const csrf = csrfOf(html);
+    res = await ctx.agent.post('/settings/password', {
+      _csrf: csrf,
+      current: 'wrong-password-value',
+      password: 'another correct horse',
+      password2: 'another correct horse',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 401);
+    assert.match(await res.text(), /not accepted/);
+
+    res = await ctx.agent.post('/settings/password', {
+      _csrf: csrf,
+      current: 'correct horse battery',
+      password: 'another correct horse',
+      password2: 'different correct horse',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 401);
+    assert.match(await res.text(), /do not match/);
+
+    res = await ctx.agent.post('/settings/password', {
+      _csrf: csrf,
+      current: 'correct horse battery',
+      password: 'another correct horse',
+      password2: 'another correct horse',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/settings');
+    const settings = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(settings, /Password updated/);
+    const signedOut = await other.fetch('/');
+    assert.equal(signedOut.status, 302);
+    assert.equal(signedOut.headers.get('location'), '/login');
+
+    res = await loginWith(ctx, new Agent(ctx.agent.base), 'correct horse battery');
+    assert.equal(res.status, 401);
+    res = await loginWith(ctx, new Agent(ctx.agent.base), 'another correct horse');
+    assert.equal(res.status, 303);
+
+    ctx.db.prepare('UPDATE admin SET failed_logins = 9, locked_until = ? WHERE id = 1')
+      .run(Math.floor(Date.now() / 1000) + 3600);
+    const guest = new Agent(ctx.agent.base);
+    html = await (await guest.fetch('/recover')).text();
+    assert.match(html, /authenticator code/);
+    assert.doesNotMatch(html, /Recovery token/);
+    const recoverCsrf = csrfOf(html);
+    res = await guest.post('/recover', {
+      _csrf: recoverCsrf,
+      password: 'third correct horse',
+      password2: 'third correct horse',
+      totp: '000000',
+    });
+    assert.equal(res.status, 401);
+    assert.match(await res.text(), /not accepted/);
+
+    res = await guest.post('/recover', {
+      _csrf: recoverCsrf,
+      password: 'third correct horse',
+      password2: 'third correct horse',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/login?reset=1');
+    assert.equal(getAdmin(ctx.db).locked_until, null);
+    const home = await ctx.agent.fetch('/');
+    assert.equal(home.status, 302);
+
+    const loginPage = await (await guest.fetch('/login?reset=1')).text();
+    assert.match(loginPage, /Password updated/);
+    assert.match(loginPage, /Forgot the password/);
+    res = await guest.post('/login', {
+      _csrf: csrfOf(loginPage),
+      username: 'ada',
+      password: 'third correct horse',
+      totp: totpCode(getAdmin(ctx.db).totp_secret),
+    });
+    assert.equal(res.status, 303);
   } finally {
     await ctx.close();
   }

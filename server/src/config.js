@@ -1,7 +1,35 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { decodeKey, LIMITS } = require('../../contract/policy');
+
+// Shell exports win. Blank and missing values come from server/.env.
+function loadEnvFile(file = path.join(__dirname, '..', '.env')) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"'))
+      || (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
 
 function loadConfig(env = process.env) {
   const missing = ['SESSION_SECRET', 'MQTT_HOST', 'MQTT_USER', 'MQTT_PASS', 'DOOR_HMAC_SECRET', 'ALLOWLIST_HMAC_KEY']
@@ -73,4 +101,4 @@ function loadConfig(env = process.env) {
   };
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, loadEnvFile };

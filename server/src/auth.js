@@ -17,19 +17,26 @@ function tokenHash(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
-function issueSetupToken(db, nowSec, ttlSec) {
+function issueStoredToken(save, db, nowSec, ttlSec) {
   const token = crypto.randomBytes(32).toString('hex');
-  dbApi.saveSetupToken(db, tokenHash(token), nowSec + ttlSec);
+  save(db, tokenHash(token), nowSec + ttlSec);
   return token;
 }
 
-function setupTokenValid(db, token, nowSec) {
-  const row = dbApi.getSetupToken(db);
+function storedTokenValid(row, token, nowSec) {
   if (!row || row.expires_at < nowSec) return false;
   const presented = sha256(String(token || ''));
   const stored = Buffer.from(row.token_hash, 'hex');
   if (stored.length !== presented.length) return false;
   return crypto.timingSafeEqual(stored, presented);
+}
+
+function issueSetupToken(db, nowSec, ttlSec) {
+  return issueStoredToken(dbApi.saveSetupToken, db, nowSec, ttlSec);
+}
+
+function setupTokenValid(db, token, nowSec) {
+  return storedTokenValid(dbApi.getSetupToken(db), token, nowSec);
 }
 
 function argonOptions(config) {
@@ -142,6 +149,60 @@ function recordFailure(db, config, admin, ip, nowSec) {
   run();
 }
 
+async function passwordMatches(hash, password) {
+  try {
+    return await argon2.verify(hash, String(password || ''));
+  } catch {
+    return false;
+  }
+}
+
+async function replacePassword(db, config, password) {
+  const passwordHash = await hashPassword(password, config);
+  const run = db.transaction(() => {
+    dbApi.setPasswordHash(db, passwordHash);
+    dbApi.deleteRecoveryToken(db);
+    dbApi.deleteSessions(db);
+  });
+  run();
+}
+
+async function changePassword(db, config, { currentPassword, nextPassword, totp, ip, nowSec }) {
+  const admin = dbApi.getAdmin(db);
+  if (!admin || admin.totp_confirmed !== 1) {
+    return { ok: false, status: 401, error: 'Current password or authentication code was not accepted.' };
+  }
+  if (tooMany(db, ip, 'password', config, nowSec)) {
+    return { ok: false, status: 429, error: 'Too many attempts. Try again in a few minutes.' };
+  }
+  const currentOk = await passwordMatches(admin.password_hash, currentPassword);
+  const totpOk = currentOk && verifyTotp(admin.totp_secret, totp, admin.username);
+  if (!currentOk || !totpOk) {
+    dbApi.insertAttempt(db, { ts: nowSec, ip, kind: 'password', success: false });
+    return { ok: false, status: 401, error: 'Current password or authentication code was not accepted.' };
+  }
+  await replacePassword(db, config, nextPassword);
+  dbApi.insertAttempt(db, { ts: nowSec, ip, kind: 'password', success: true });
+  return { ok: true };
+}
+
+async function recoverPassword(db, config, { password, totp, ip, nowSec }) {
+  const admin = dbApi.getAdmin(db);
+  if (!admin || admin.totp_confirmed !== 1) {
+    return { ok: false, status: 401, error: 'Finish setup before recovering a password.' };
+  }
+  if (tooMany(db, ip, 'recover', config, nowSec)) {
+    return { ok: false, status: 429, error: 'Too many attempts. Try again in a few minutes.' };
+  }
+  if (!verifyTotp(admin.totp_secret, totp, admin.username)) {
+    dbApi.insertAttempt(db, { ts: nowSec, ip, kind: 'recover', success: false });
+    return { ok: false, status: 401, error: 'The authentication code was not accepted.' };
+  }
+  await replacePassword(db, config, password);
+  dbApi.insertAttempt(db, { ts: nowSec, ip, kind: 'recover', success: true });
+  return { ok: true };
+}
+
 async function dummyHash(db, config) {
   const existing = dbApi.getSetting(db, 'dummy_argon');
   if (existing) return existing;
@@ -153,6 +214,8 @@ async function dummyHash(db, config) {
 module.exports = {
   issueSetupToken,
   setupTokenValid,
+  changePassword,
+  recoverPassword,
   verifyTotp,
   totpForSecret,
   tooMany,

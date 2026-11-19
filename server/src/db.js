@@ -31,6 +31,12 @@ function migrate(db) {
       expires_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS recovery_tokens (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      token_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS tags (
       uid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -149,6 +155,31 @@ function saveSetupToken(db, tokenHash, expiresAt) {
 
 function deleteSetupToken(db) {
   db.prepare('DELETE FROM setup_tokens WHERE id = 1').run();
+}
+
+function setPasswordHash(db, passwordHash) {
+  db.prepare(`
+    UPDATE admin SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE id = 1
+  `).run(passwordHash);
+}
+
+function deleteSessions(db) {
+  db.prepare('DELETE FROM sessions').run();
+}
+
+function getRecoveryToken(db) {
+  return db.prepare('SELECT token_hash, expires_at FROM recovery_tokens WHERE id = 1').get() || null;
+}
+
+function saveRecoveryToken(db, tokenHash, expiresAt) {
+  db.prepare(`
+    INSERT INTO recovery_tokens (id, token_hash, expires_at) VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET token_hash = excluded.token_hash, expires_at = excluded.expires_at
+  `).run(tokenHash, expiresAt);
+}
+
+function deleteRecoveryToken(db) {
+  db.prepare('DELETE FROM recovery_tokens WHERE id = 1').run();
 }
 
 function countFailures(db, ip, kind, since) {
@@ -312,6 +343,11 @@ module.exports = {
   getSetupToken,
   saveSetupToken,
   deleteSetupToken,
+  setPasswordHash,
+  deleteSessions,
+  getRecoveryToken,
+  saveRecoveryToken,
+  deleteRecoveryToken,
   countFailures,
   insertAttempt,
   pruneAttempts,

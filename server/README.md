@@ -11,7 +11,7 @@ npm install
 npm test
 ```
 
-The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, lockout, a simulated UID read, offline log upload, manual open, Telegram toggles, the CSV export, and the live WebSocket.
+The tests use a temporary database and a fake MQTT connection. They cover setup and TOTP login, password change and recovery, lockout, a simulated UID read, offline log upload, manual open, Telegram toggles, the CSV export, and the live WebSocket.
 
 ## Configure
 
@@ -36,6 +36,12 @@ npm start
 The first start prints a setup token to that terminal (journald, once the service is installed). Open the app, enter that token, choose a username and a password of at least 12 characters, then confirm the authenticator code. The token expires after 30 minutes. Restart the process to print another one. There is no default password.
 
 Five failed logins from one address in 15 minutes are refused. Ten failed logins lock the account for 15 minutes.
+
+## Password
+
+Change it under Settings while logged in. Enter the current password, a new password of at least 12 characters, and the authenticator code. Other browsers are signed out.
+
+If the password is forgotten, open **Forgot the password?** on the log-in page. Enter a new password and the authenticator code. Every session is signed out. Restarting the service does not reset the password.
 
 ## Install on the Pi
 
