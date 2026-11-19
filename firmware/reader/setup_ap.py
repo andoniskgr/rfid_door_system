@@ -78,21 +78,86 @@ def _form(body):
     return fields
 
 
-def _page(notice):
-    note = "<p>%s</p>" % notice if notice else ""
+def _esc(value):
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def nearby_networks(wlan=None):
+    if wlan is None:
+        wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    try:
+        rows = wlan.scan()
+    except OSError as err:
+        print("scan", err)
+        return []
+    seen = {}
+    for row in rows:
+        if not row:
+            continue
+        name = row[0]
+        if isinstance(name, bytes):
+            try:
+                name = name.decode()
+            except UnicodeError:
+                continue
+        if not isinstance(name, str) or not name or len(name) > 32:
+            continue
+        rssi = row[3] if len(row) > 3 else 0
+        if isinstance(rssi, bool) or not isinstance(rssi, int):
+            rssi = 0
+        secure = True
+        if len(row) > 4 and row[4] == 0:
+            secure = False
+        prev = seen.get(name)
+        if prev is None or rssi > prev["rssi"]:
+            seen[name] = {"ssid": name, "rssi": rssi, "secure": secure}
+    found = list(seen.values())
+    found.sort(key=lambda item: item["rssi"], reverse=True)
+    return found[:15]
+
+
+def _page(notice, networks):
+    note = "<p>" + _esc(notice) + "</p>" if notice else ""
+    choices = []
+    for item in networks:
+        label = _esc(item.get("ssid", ""))
+        rssi = item.get("rssi")
+        if isinstance(rssi, int) and not isinstance(rssi, bool):
+            label += " (" + str(rssi) + " dBm)"
+        if item.get("secure") is False:
+            label += ", open"
+        choices.append(
+            '<label class="net"><input type="radio" name="pick" value="'
+            + _esc(item.get("ssid", "")) + '"> ' + label + "</label>"
+        )
+    if choices:
+        listing = "<p>Choose a network:</p>" + "".join(choices)
+    else:
+        listing = "<p>No networks found. Scan again, or type the name.</p>"
     return (
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Door reader Wi-Fi</title></head><body>"
-        "<h1>Door reader Wi-Fi</h1>%s"
-        "<form method=\"post\" action=\"/\">"
-        "<p><label>Network name<br><input name=\"ssid\" maxlength=\"32\" required></label></p>"
-        "<p><label>Password<br><input name=\"password\" type=\"password\" maxlength=\"63\"></label></p>"
-        "<p><button type=\"submit\">Save and connect</button></p>"
-        "</form>"
-        "<p>Use at least 8 characters. Leave the password empty only for an open network.</p>"
-        "</body></html>"
-    ) % note
+        "<title>Door reader Wi-Fi</title>"
+        "<style>label.net{display:block;margin:.4rem 0}</style></head><body>"
+        "<h1>Door reader Wi-Fi</h1>"
+        + note
+        + '<p><a href="/?rescan=1">Scan again</a></p>'
+        + '<form method="post" action="/">'
+        + listing
+        + '<p><label>Hidden network<br><input name="other" maxlength="32"></label></p>'
+        + '<p><label>Password<br><input name="password" type="password" maxlength="63"></label></p>'
+        + '<p><button type="submit">Save and connect</button></p>'
+        + "</form>"
+        + "<p>Use at least 8 characters. Leave the password empty only for an open network.</p>"
+        + "</body></html>"
+    )
 
 
 def _done_page():
@@ -206,6 +271,7 @@ def serve(ui, timeout_s, setup_password, notice=""):
         poller.register(dns, select.POLLIN)
         deadline = ticks_add(ticks_ms(), int(timeout_s) * 1000)
         message = notice
+        networks = None
         while ticks_diff(deadline, ticks_ms()) > 0:
             if ui is not None:
                 ui.set_both(((ticks_ms() // 500) & 1) == 0)
@@ -235,16 +301,21 @@ def serve(ui, timeout_s, setup_password, notice=""):
                     conn.settimeout(3)
                     head, body = _read_http(conn)
                     line = head.split(b"\r\n", 1)[0]
-                    method = line.split(b" ", 1)[0] if line else b""
+                    parts = line.split(b" ")
+                    method = parts[0] if parts else b""
+                    target = parts[1] if len(parts) > 1 else b"/"
+                    if networks is None or (method == b"GET" and b"rescan=1" in target):
+                        networks = nearby_networks()
                     if method == b"POST":
                         fields = _form(body)
-                        ssid = fields.get("ssid", "")
+                        typed = fields.get("other", "").strip()
+                        ssid = typed or fields.get("pick", "")
                         password = fields.get("password", "")
                         if credentials_ok(ssid, password):
                             _send(conn, "200 OK", _done_page())
                             return ssid, password
-                        message = "Use a network name, and a password of at least 8 characters."
-                    _send(conn, "200 OK", _page(message))
+                        message = "Choose a network, and use a password of at least 8 characters."
+                    _send(conn, "200 OK", _page(message, networks))
                 except Exception as err:
                     print("setup", err)
                 finally:

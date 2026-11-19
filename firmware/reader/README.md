@@ -34,13 +34,13 @@ mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py 
 mpremote reset
 ```
 
-Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.2.0` is the first build that can change Wi-Fi without another copy.
+Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy.
 
 Reload Mosquitto after installing the ACL in `contract/mosquitto/acl`. The reader has to be allowed to subscribe to `door/reader/wifi`, or the Settings page can send a network the Pico never receives.
 
 ## Change Wi-Fi
 
-Settings, while the reader is online, sends the new name and password. The Pico stores them in `/wifi.json` and joins. If the new network refuses the join, it goes back to the previous one. The password is not kept on the Pi.
+Settings, while the reader is online, can scan and list the networks the Pico can see. Choose one and enter its password. The Pico stores the choice in `/wifi.json` and joins. If the new network refuses the join, it goes back to the previous one. The password is not kept on the Pi. The setup page at `http://192.168.4.1` shows the same kind of list, with a Scan again link.
 
 Reset Wi-Fi clears `/wifi.json` and the Pico broadcasts `Door-Setup` for 10 minutes. The page shows a one-time password. Join that network from a phone, open `http://192.168.4.1`, and enter the new network. Then put the phone back on the home Wi-Fi.
 

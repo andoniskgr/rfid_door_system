@@ -114,7 +114,7 @@ The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). Th
 { "schema": 1, "id": "<32 hex>", "ts": 1794582240, "action": "forget", "setup_password": "ABCD234567" }
 ```
 
-`set` joins the new network and, if that fails, joins the previous one again. `forget` clears the saved network and starts an access point named `Door-Setup` for 10 minutes. A phone on that network opens `http://192.168.4.1`.
+`set` joins the new network and, if that fails, joins the previous one again. `forget` clears the saved network and starts an access point named `Door-Setup` for 10 minutes. A phone on that network opens `http://192.168.4.1`. `scan` asks the reader to look for networks. The next status includes `scan_id` (the command id) and `networks`, a list of `{ "ssid", "rssi", "secure" }`. That list is not kept in later heartbeats.
 
 **Last Will**, set before connect, QoS 1, retained, on that device’s status topic. The payload is exactly these bytes, with no spaces and no newline:
 

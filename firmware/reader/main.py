@@ -27,7 +27,7 @@ from policy import (
 from store import Store
 from ui import Ui
 
-FW = "0.2.0"
+FW = "0.3.0"
 CLIENT_ID = "door-reader"
 
 
@@ -123,6 +123,7 @@ class Reader:
         self.boot = time.ticks_ms()
         self.ssid, self.password = wifi_store.load(secrets)
         self.wifi_cmd = None
+        self.scan_report = None
         self.setup_pin = Pin(pins.SETUP, Pin.IN, Pin.PULL_UP)
         self.setup_hold = 0
         self.setup_armed = True
@@ -272,6 +273,12 @@ class Reader:
         if not previous[0]:
             wifi_store.save("", "")
 
+    def _publish_scan(self, scan_id):
+        networks = setup_ap.nearby_networks(self.wlan)
+        self.scan_report = {"id": scan_id, "networks": networks}
+        print("scan", len(networks))
+        self._publish_status()
+
     def _take_wifi_cmd(self):
         cmd = self.wifi_cmd
         if cmd is None:
@@ -280,6 +287,11 @@ class Reader:
         if not isinstance(cmd, dict) or cmd.get("schema") != 1:
             return
         action = cmd.get("action")
+        if action == "scan":
+            scan_id = cmd.get("id")
+            if isinstance(scan_id, str) and len(scan_id) == 32:
+                self._publish_scan(scan_id)
+            return
         if action == "set":
             ssid = cmd.get("ssid")
             password = cmd.get("password")
@@ -536,7 +548,12 @@ class Reader:
             "allowlist_version": self.store.version,
             "log_queued": len(self.store.entries_log),
         }
-        self.mqtt.publish("door/reader/status", json.dumps(body), True)
+        report = self.scan_report
+        if isinstance(report, dict):
+            body["scan_id"] = report.get("id")
+            body["networks"] = report.get("networks")
+        if self.mqtt.publish("door/reader/status", json.dumps(body), True):
+            self.scan_report = None
 
 
 Reader().run()

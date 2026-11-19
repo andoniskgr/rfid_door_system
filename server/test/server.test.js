@@ -756,6 +756,75 @@ test('reader wifi can be replaced or reset from settings', async () => {
   }
 });
 
+test('settings can scan networks at the reader', async () => {
+  const ctx = await start();
+  try {
+    await enroll(ctx);
+    const now = Math.floor(Date.now() / 1000);
+    const status = {
+      schema: 1,
+      id: '11111111111111111111111111111111',
+      online: true,
+      ts: now,
+      fw: '0.2.0',
+      uptime_s: 5,
+      ip: '192.168.2.40',
+      rssi: -60,
+      ntp: true,
+      allowlist_version: 1,
+      log_queued: 0,
+      ssid: 'Old Network',
+    };
+    ctx.door.handle('door/reader/status', status);
+    let html = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(html, /Scan networks/);
+    let res = await ctx.agent.post('/settings/wifi/scan', { _csrf: csrfOf(html) });
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /scan for networks/);
+
+    status.fw = '0.3.0';
+    status.id = '22222222222222222222222222222222';
+    ctx.door.handle('door/reader/status', status);
+    html = await (await ctx.agent.fetch('/settings')).text();
+    const posted = ctx.agent.post('/settings/wifi/scan', { _csrf: csrfOf(html) });
+    let scan;
+    for (let i = 0; i < 50 && !scan; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      scan = ctx.transport.messages.find((item) => item.payload && item.payload.action === 'scan');
+    }
+    assert.ok(scan);
+    assert.equal(scan.opts.retain, false);
+    ctx.door.handle('door/reader/status', {
+      ...status,
+      id: '33333333333333333333333333333333',
+      scan_id: scan.payload.id,
+      networks: [
+        { ssid: 'Home', rssi: -40, secure: true },
+        { ssid: 'Cafe', rssi: -70, secure: false },
+        { ssid: '', rssi: -20, secure: true },
+      ],
+    });
+    res = await posted;
+    assert.equal(res.status, 303);
+    const page = await (await ctx.agent.fetch('/settings')).text();
+    assert.match(page, /name="ssid" value="Home"/);
+    assert.match(page, /name="ssid" value="Cafe"/);
+    assert.match(page, /open/);
+    assert.doesNotMatch(page, /name="ssid" value=""/);
+
+    res = await ctx.agent.post('/settings/wifi', {
+      _csrf: csrfOf(page),
+      ssid: 'Home',
+      password: 'correct horse',
+    });
+    assert.equal(res.status, 303);
+    const sent = ctx.transport.messages.filter((item) => item.payload && item.payload.action === 'set').at(-1);
+    assert.equal(sent.payload.ssid, 'Home');
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('websocket snapshot requires the session', async () => {
   const ctx = await start();
   try {

@@ -328,7 +328,16 @@ function logPage({ csrf, flash, rows, filters, page, pages, total }) {
   });
 }
 
-function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, wifiError, reader }) {
+function networkChoices(networks) {
+  if (!networks.length) return '<p class="muted">Scan to list the networks the reader can see.</p>';
+  return networks.map((item) => {
+    let label = item.ssid;
+    if (item.rssi != null) label += ` (${item.rssi} dBm${item.secure ? '' : ', open'})`;
+    return `<label class="check"><input type="radio" name="ssid" value="${esc(item.ssid)}"> ${esc(label)}</label>`;
+  }).join('');
+}
+
+function settingsPage({ csrf, flash, toggles, telegramConfigured, username, passwordError, wifiError, reader, networks = [] }) {
   let where = 'The reader is offline.';
   if (reader.online && reader.ssid) {
     where = `The reader is on ${reader.ssid}${reader.ip ? ` at ${reader.ip}` : ''}.`;
@@ -354,11 +363,16 @@ function settingsPage({ csrf, flash, toggles, telegramConfigured, username, pass
         <button type="submit">Save</button>
       </form>
       <h2>Reader Wi-Fi</h2>
-      <p class="muted">${esc(where)} Saving sends a new network to the reader. A wrong password leaves it on the current one. Reset clears the saved network and starts a temporary Door-Setup network at the door for 10 minutes. The home Wi-Fi password is not stored on the Pi.</p>
+      <p class="muted">${esc(where)} Scan lists the networks at the door. Choose one and enter its password. A wrong password leaves the reader on the current network. Reset clears the saved network and starts Door-Setup for 10 minutes.</p>
       ${wifiError ? `<p class="flash bad">${esc(wifiError)}</p>` : ''}
+      <form method="post" action="/settings/wifi/scan" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <button type="submit">Scan networks</button>
+      </form>
       <form method="post" action="/settings/wifi" class="stack">
         <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        ${field('Network name', '<input name="ssid" maxlength="32" autocomplete="off" required>')}
+        ${networkChoices(networks)}
+        ${field('Hidden network', '<input name="other" maxlength="32" autocomplete="off">')}
         ${field('Password', '<input name="password" type="password" maxlength="63" autocomplete="new-password">')}
         <button type="submit">Save network</button>
       </form>

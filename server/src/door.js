@@ -32,6 +32,8 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
   const denyHits = new Map();
   const denyNotified = new Map();
   const unknownNotified = new Map();
+  const scanWaiters = new Map();
+  let lastWifiScan = [];
 
   function offset() {
     return currentOffsetMin(config.tz, new Date(now() * 1000));
@@ -274,6 +276,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       telegram.notify('device', `${name} is ${online ? 'online' : 'offline'}.`);
     }
     broadcastDevices();
+    if (role === 'reader') noteScan(msg);
   }
 
   function onResult(msg) {
@@ -384,13 +387,13 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return { online: Boolean(row && row.online), fw };
   }
 
-  function firmwareCanSetWifi(fw) {
+  function firmwareCanSetWifi(fw, minor) {
     const nums = String(fw).split('.').map((part) => Number(part));
     if (nums.length < 2 || nums.some((part) => !Number.isInteger(part))) return false;
-    return nums[0] > 0 || nums[1] >= 2;
+    return nums[0] > 0 || nums[1] >= minor;
   }
 
-  function requireReader() {
+  function requireReader(minor) {
     if (!transport.connected) {
       const err = new Error('The broker is not connected.');
       err.code = 'NO_MQTT';
@@ -402,12 +405,45 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
       err.code = 'OFFLINE';
       throw err;
     }
-    if (!firmwareCanSetWifi(reader.fw)) {
+    if (!firmwareCanSetWifi(reader.fw, minor)) {
       const shown = reader.fw || 'an older version';
-      const err = new Error(`Reflash the reader before changing Wi-Fi. This one is still on firmware ${shown}.`);
+      const text = minor >= 3
+        ? `Reflash the reader to scan for networks. This one is still on firmware ${shown}.`
+        : `Reflash the reader before changing Wi-Fi. This one is still on firmware ${shown}.`;
+      const err = new Error(text);
       err.code = 'OLD_FW';
       throw err;
     }
+  }
+
+  function cleanNetworks(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const item of value) {
+      if (!item || typeof item !== 'object') continue;
+      const ssid = cleanSsid(item.ssid);
+      if (!ssid || seen.has(ssid)) continue;
+      seen.add(ssid);
+      out.push({
+        ssid,
+        rssi: Number.isInteger(item.rssi) ? item.rssi : null,
+        secure: item.secure !== false,
+      });
+      if (out.length >= 15) break;
+    }
+    return out;
+  }
+
+  function noteScan(msg) {
+    if (!msg || typeof msg.scan_id !== 'string') return;
+    const networks = cleanNetworks(msg.networks);
+    lastWifiScan = networks;
+    const waiter = scanWaiters.get(msg.scan_id);
+    if (!waiter) return;
+    scanWaiters.delete(msg.scan_id);
+    clearTimeout(waiter.timer);
+    waiter.resolve(networks);
   }
 
   function makeSetupPassword() {
@@ -421,12 +457,17 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
   async function setReaderWifi(ssid, password) {
     const name = cleanSsid(ssid);
     const secret = cleanPassword(password);
-    if (!name || secret === null) {
+    if (!name) {
+      const err = new Error('Choose a network from the list, or type its name.');
+      err.code = 'BAD_WIFI';
+      throw err;
+    }
+    if (secret === null) {
       const err = new Error('A Wi-Fi password needs 8 to 63 characters. Leave it empty only for an open network.');
       err.code = 'BAD_WIFI';
       throw err;
     }
-    requireReader();
+    requireReader(2);
     await publish('door/reader/wifi', {
       schema: 1,
       id: randomId(),
@@ -438,8 +479,40 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return { ssid: name };
   }
 
+  async function scanReaderWifi() {
+    requireReader(3);
+    const id = randomId();
+    let timer;
+    const pending = new Promise((resolve, reject) => {
+      timer = setTimeout(() => {
+        scanWaiters.delete(id);
+        const err = new Error('The reader did not return a scan. Reflash it if this Pico is not on firmware 0.3.0.');
+        err.code = 'TIMEOUT';
+        reject(err);
+      }, 12000);
+      scanWaiters.set(id, { resolve, reject, timer });
+    });
+    try {
+      await publish('door/reader/wifi', {
+        schema: 1,
+        id,
+        ts: now(),
+        action: 'scan',
+      }, false);
+    } catch (err) {
+      clearTimeout(timer);
+      scanWaiters.delete(id);
+      throw err;
+    }
+    return pending;
+  }
+
+  function wifiNetworks() {
+    return lastWifiScan;
+  }
+
   async function forgetReaderWifi() {
-    requireReader();
+    requireReader(2);
     const setupPassword = makeSetupPassword();
     await publish('door/reader/wifi', {
       schema: 1,
@@ -460,7 +533,9 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     };
   }
 
-  return { handle, sweep, publishAllowlist, openNow, setReaderWifi, forgetReaderWifi, snapshot };
+  return {
+    handle, sweep, publishAllowlist, openNow, setReaderWifi, scanReaderWifi, forgetReaderWifi, wifiNetworks, snapshot,
+  };
 }
 
 module.exports = { createDoor, randomId };

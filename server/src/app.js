@@ -341,9 +341,26 @@ function createApp({ db, config, door }) {
     res.redirect(303, '/settings');
   });
 
+  app.post('/settings/wifi/scan', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
+    try {
+      const networks = await door.scanReaderWifi();
+      req.session.flash = {
+        type: 'ok',
+        text: networks.length
+          ? `Found ${networks.length} networks. Choose one and enter its password.`
+          : 'The reader found no networks. Scan again, or type the name below.',
+      };
+      res.redirect(303, '/settings');
+    } catch (err) {
+      const status = wifiStatus(err);
+      if (!status) throw err;
+      res.status(status).type('html').send(settingsView(req, { wifiError: err.message }));
+    }
+  }));
+
   app.post('/settings/wifi', requireAdmin, requireCsrf, asyncRoute(async (req, res) => {
     try {
-      const saved = await door.setReaderWifi(req.body.ssid, typeof req.body.password === 'string' ? req.body.password : '');
+      const saved = await door.setReaderWifi(chosenSsid(req.body), typeof req.body.password === 'string' ? req.body.password : '');
       req.session.flash = {
         type: 'ok',
         text: `The reader is switching to ${saved.ssid}. If that network does not accept it, the reader stays on the current one.`,
@@ -420,6 +437,7 @@ function createApp({ db, config, door }) {
       passwordError: extra.passwordError,
       wifiError: extra.wifiError,
       reader: presentDevice(row, config.tz),
+      networks: door.wifiNetworks(),
     });
   }
 
@@ -635,9 +653,16 @@ function regenerate(req, fields, done) {
   });
 }
 
+function chosenSsid(body) {
+  const typed = body && typeof body.other === 'string' ? body.other : '';
+  const picked = body && typeof body.ssid === 'string' ? body.ssid : '';
+  return typed.trim() ? typed : picked;
+}
+
 function wifiStatus(err) {
   if (!err) return 0;
   if (err.code === 'BAD_WIFI') return 400;
+  if (err.code === 'TIMEOUT') return 504;
   if (err.code === 'NO_MQTT' || err.code === 'OFFLINE' || err.code === 'OLD_FW') return 409;
   return 0;
 }

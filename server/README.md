@@ -76,7 +76,7 @@ A database backup is written to `data/backups/` once a day, the first time the p
 
 ## Reader Wi-Fi
 
-Settings can send the entrance reader a new network, or clear the saved one. The reader has to be online and on firmware 0.2.0 or newer. The home Wi-Fi password is published once on `door/reader/wifi` and is not stored on the Pi. A wrong password leaves the reader on its current network.
+Settings can ask the entrance reader to scan, then lists the networks it can see. Choose one and enter its password, or clear the saved network. The reader has to be online. Changing the network needs firmware 0.2.0 or newer. The scan list needs 0.3.0 or newer. The home Wi-Fi password is published once on `door/reader/wifi` and is not stored on the Pi. A wrong password leaves the reader on its current network.
 
 Reset starts a 10-minute `Door-Setup` network at the door. The page shows the password for that network and the address to open on a phone, `http://192.168.4.1`. Install the updated broker ACL before using this, or the reader is not allowed to subscribe to the command.
 
