@@ -7,7 +7,7 @@ Apartment door access for one entrance. A Pico W reads a MIFARE UID, a Raspberry
 | MQTT contract, ACL, simulators | `contract/`, `tools/` | in the tree |
 | Server (Node.js, Express, SQLite) | `server/` | in the tree |
 | Actuator firmware (ESP-01, PlatformIO) | `firmware/actuator/` | after the server |
-| Reader firmware (Pico W, MicroPython) | `firmware/reader/` | last |
+| Reader firmware (Pico W, MicroPython) | `firmware/reader/` | in the tree |
 
 The wire rules and the no-hardware tests are in [contract/README.md](contract/README.md).
 
@@ -47,7 +47,7 @@ The upgrade path, when the UID check is no longer enough, is MIFARE DESFire EV2 
 ```text
 contract/     MQTT topics, ACL, examples, reference decisions
 tools/        sim-read.js, sign-open.js, self-test.js
-firmware/     reader (MicroPython) and actuator (PlatformIO), not written yet
+firmware/     reader (MicroPython); actuator (PlatformIO) not written yet
 server/       web app, SQLite, MQTT client
 ```
 
