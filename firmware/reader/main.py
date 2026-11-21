@@ -8,12 +8,10 @@
 import json
 import time
 
-import machine
 import network
 import ntptime
-from machine import PWM, Pin, SPI
+from machine import PWM, Pin, SoftSPI
 
-import battery
 import pins
 import secrets
 import setup_ap
@@ -35,7 +33,7 @@ from policy import (
 from store import Store
 from ui import Ui
 
-FW = "0.5.0"
+FW = "0.6.1"
 CLIENT_ID = "door-reader"
 
 
@@ -116,23 +114,15 @@ class Reader:
             Pin(pins.LED_RED, Pin.OUT),
             PWM(Pin(pins.BUZZER)),
         )
-        spi = SPI(
-            0,
-            baudrate=1000000,
-            polarity=0,
-            phase=0,
-            sck=Pin(pins.SCK),
-            mosi=Pin(pins.MOSI),
-            miso=Pin(pins.MISO),
-        )
+        self.spi = self._open_spi()
+        self.irq = Pin(pins.IRQ, Pin.IN, Pin.PULL_DOWN)
         self.rfid = MFRC522(
-            spi,
+            self.spi,
             Pin(pins.SDA, Pin.OUT, value=1),
             Pin(pins.RST, Pin.OUT, value=1),
         )
         self.rfid.power_down()
         self.boot = time.ticks_ms()
-        self.fast_hz = machine.freq()
         self.ssid, self.password = wifi_store.load(secrets)
         self.wifi_cmd = None
         self.scan_report = None
@@ -150,12 +140,7 @@ class Reader:
         self.holding = None
         self.feedback = {}
         self.radio = False
-        self.sleep_ok = True
-        self.on_battery = False
-        self.power_at = 0
         self.ui_on = True
-        self.wall_base = None
-        self.slept_ms = 0
         self.link_at = time.ticks_ms()
         self.link_gap = 0
 
@@ -192,7 +177,7 @@ class Reader:
         return time.ticks_diff(time.ticks_ms(), self.link_at) >= self.link_gap
 
     def _session(self, uid):
-        # One radio window: a tap, or the periodic allowlist and battery check.
+        # One radio window: a tap, or the periodic allowlist check.
         self._ui_wake()
         connected = False
         try:
@@ -264,19 +249,21 @@ class Reader:
             except Exception:
                 pass
 
+    def _open_spi(self):
+        return SoftSPI(
+            baudrate=1000000,
+            polarity=0,
+            phase=0,
+            sck=Pin(pins.SCK),
+            mosi=Pin(pins.MOSI),
+            miso=Pin(pins.MISO),
+        )
+
     def _bus(self):
         try:
             self.spi.init(baudrate=1000000, polarity=0, phase=0)
         except Exception:
-            self.spi = SPI(
-                0,
-                baudrate=1000000,
-                polarity=0,
-                phase=0,
-                sck=Pin(pins.SCK),
-                mosi=Pin(pins.MOSI),
-                miso=Pin(pins.MISO),
-            )
+            self.spi = self._open_spi()
             self.rfid.spi = self.spi
 
     def _nap(self, ms):
@@ -286,68 +273,7 @@ class Reader:
         except Exception:
             pass
         self._ui_sleep()
-        self._sample_power()
-        self._slow()
-        if not self.sleep_ok or not self.on_battery:
-            time.sleep_ms(ms)
-            return
-        mark = time.ticks_ms()
-        try:
-            machine.lightsleep(ms)
-        except Exception as err:
-            print("sleep", err)
-            self.sleep_ok = False
-            time.sleep_ms(ms)
-            return
-        elapsed = time.ticks_diff(time.ticks_ms(), mark)
-        if elapsed < ms // 2:
-            print("sleep unavailable")
-            self.sleep_ok = False
-            return
-        self._note_sleep(elapsed)
-
-    def _note_sleep(self, elapsed):
-        # time.time() is whole seconds. If light sleep freezes it, catch up
-        # once the gap is larger than that rounding.
-        if not self.clock.synced:
-            return
-        if self.wall_base is None:
-            self.wall_base = time.time()
-            self.slept_ms = 0
-            return
-        self.slept_ms += elapsed
-        wall_ms = (time.time() - self.wall_base) * 1000
-        if wall_ms < 0:
-            self.wall_base = time.time()
-            self.slept_ms = 0
-            return
-        lag = self.slept_ms - wall_ms
-        if lag < 2000:
-            return
-        step = lag // 1000
-        self._catch_clock(time.time() + step)
-        self.wall_base = time.time()
-        self.slept_ms = 0
-
-    def _catch_clock(self, unix):
-        if unix < 1600000000:
-            return
-        parts = time.gmtime(int(unix))
-        try:
-            machine.RTC().datetime((
-                parts[0], parts[1], parts[2], parts[6],
-                parts[3], parts[4], parts[5], 0,
-            ))
-        except Exception as err:
-            print("clock", err)
-
-    def _sample_power(self):
-        if self.power_at and not self._due(self.power_at, 15000):
-            return
-        sample = battery.read()
-        battery.park()
-        self.power_at = time.ticks_ms()
-        self.on_battery = sample.get("power") == "battery"
+        time.sleep_ms(ms)
 
     def _wlan(self):
         if self.wlan is None:
@@ -355,7 +281,6 @@ class Reader:
         return self.wlan
 
     def _radio_on(self):
-        self._fast()
         self.radio = True
         try:
             self._wlan().active(True)
@@ -392,24 +317,6 @@ class Reader:
             except OSError:
                 pass
         self.radio = False
-        battery.park()
-        self._slow()
-
-    def _fast(self):
-        try:
-            if machine.freq() != self.fast_hz:
-                machine.freq(self.fast_hz)
-        except Exception as err:
-            print("freq", err)
-
-    def _slow(self):
-        if not self.on_battery or self.radio:
-            return
-        try:
-            if machine.freq() != 48000000:
-                machine.freq(48000000)
-        except Exception as err:
-            print("freq", err)
 
     def _ui_wake(self):
         if self.ui_on:
@@ -507,7 +414,6 @@ class Reader:
     def _enter_setup(self, setup_password):
         previous = (self.ssid, self.password)
         self.radio = True
-        self._fast()
         self._ui_wake()
         self.mqtt.close()
         try:
@@ -601,8 +507,6 @@ class Reader:
             return
         self.ntp_try = time.ticks_ms()
         if self.clock.sync():
-            self.wall_base = None
-            self.slept_ms = 0
             print("ntp", self.clock.unix())
 
     def _ensure_mqtt(self):
@@ -806,11 +710,6 @@ class Reader:
             "log_queued": len(self.store.entries_log),
             "sleeping": True,
         }
-        sample = battery.read()
-        body["power"] = sample.get("power", "unknown")
-        for key in ("vsys_mv", "battery_mv", "battery_pct"):
-            if isinstance(sample.get(key), int):
-                body[key] = sample[key]
         report = self.scan_report
         if isinstance(report, dict):
             body["scan_id"] = report.get("id")

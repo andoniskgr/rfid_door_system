@@ -8,7 +8,7 @@ Status is retained on `door/actuator/status` every 30 seconds. The last will is 
 
 ## Wiring
 
-3.3 V only. CH_PD (EN) stays at 3.3 V.
+3.3 V only. CH_PD (EN) stays at 3.3 V. Power comes from the 12 V DC supply through a step-down. If that converter is set to 5 V for the Pico, use a 3.3 V regulator from the 5 V rail for this module. Do not connect 12 V or 5 V to the ESP-01.
 
 | Signal | ESP-01 |
 |---|---|

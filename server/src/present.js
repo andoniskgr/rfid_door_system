@@ -42,23 +42,6 @@ function presentEvent(row, timeZone) {
   };
 }
 
-function batteryOf(payload) {
-  const power = payload.power === 'battery' || payload.power === 'usb' || payload.power === 'unknown'
-    ? payload.power
-    : '';
-  const vsys = payload.vsys_mv;
-  const vsysMv = Number.isInteger(vsys) && vsys >= 0 && vsys <= 6000 ? vsys : null;
-  if (power !== 'battery') return { power, batteryMv: null, batteryPct: null, vsysMv };
-  const mv = payload.battery_mv;
-  const pct = payload.battery_pct;
-  return {
-    power,
-    vsysMv,
-    batteryMv: Number.isInteger(mv) && mv >= 2500 && mv <= 4500 ? mv : null,
-    batteryPct: Number.isInteger(pct) && pct >= 0 && pct <= 100 ? pct : null,
-  };
-}
-
 function presentDevice(row, timeZone) {
   let payload = {};
   if (row.payload) {
@@ -73,7 +56,6 @@ function presentDevice(row, timeZone) {
     ip: payload.ip || '',
     ssid: typeof payload.ssid === 'string' ? payload.ssid.slice(0, 32) : '',
     rssi: Number.isInteger(payload.rssi) ? payload.rssi : null,
-    ...batteryOf(payload),
     allowlist: Number.isInteger(payload.allowlist_version) ? payload.allowlist_version : null,
     relay: payload.relay || '',
     logQueued: Number.isInteger(payload.log_queued) ? payload.log_queued : null,

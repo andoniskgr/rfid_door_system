@@ -11,6 +11,10 @@ Apartment door access for one entrance. A Pico W reads a MIFARE UID, a Raspberry
 
 The wire rules and the no-hardware tests are in [contract/README.md](contract/README.md).
 
+## Power
+
+One 12 V DC supply feeds the door. A step-down converter makes 5 V for the Pico on VSYS, and the ESP-01 takes 3.3 V from a regulator on that rail. Neither board is connected to 12 V. The Pico USB port is for programming.
+
 ## How a tap is handled
 
 The Pico sleeps with Wi-Fi off until a card is read or its 10-minute check-in. It then publishes the UID and waits 1.2 seconds. If the server answers, the server decides and, on a grant, sends a signed open command to the ESP-01. If the server does not answer, the Pico checks a cached allowlist of HMAC-SHA256 UID hashes and can send that open command itself. The allowlist is a retained MQTT message, versioned, and refreshed when tags change.

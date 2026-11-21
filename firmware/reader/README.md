@@ -10,11 +10,12 @@ The RC522 uses 3.3 V, not 5 V.
 
 | Signal | Pico |
 |---|---|
-| SCK | GP6 |
-| MOSI | GP7 |
-| MISO | GP4 |
-| SDA | GP5 |
-| RST | GP22 |
+| SDA (chip select) | GP20 |
+| SCK | GP21 |
+| MOSI | GP26 |
+| MISO | GP22 |
+| IRQ | GP27 |
+| RST | GP28 |
 | LED green | GP16 |
 | LED red | GP17 |
 | Buzzer | GP18 |
@@ -22,34 +23,17 @@ The RC522 uses 3.3 V, not 5 V.
 
 The LEDs and the buzzer are active high. GP18 is driven with a tone, so a passive piezo or an active buzzer both make a sound.
 
-## Battery
+## Power
 
-One protected 18650 powers the reader. The cell’s 3.0–4.2 V range fits VSYS (1.8–5.5 V). The lock stays on the actuator supply. This cell does not feed the relay.
+A 12 V DC supply feeds the reader through a step-down converter set to 5 V. The converter’s 5 V output goes to Pico VSYS (pin 39), and its ground goes to Pico GND. VSYS must stay at or below 5.5 V, so 12 V never connects to the Pico. Do not feed the converter into 3V3. 3V3 is a regulator output. The Pico USB port is for programming.
 
-Use a cell with its own protection board, a TP4056 charger, and a 1N5819 Schottky diode. The banded end of the diode points at the Pico.
+The ESP-01 still needs 3.3 V. If this converter is the shared 5 V rail, use a 3.3 V regulator from that rail for the ESP-01. Do not put 5 V or 12 V on the ESP-01.
 
-```text
-18650 +  ---- TP4056 B+
-18650 -  ---- TP4056 B-
-TP4056 OUT+ ---- diode ---- Pico VSYS (pin 39)
-TP4056 OUT- -------------- Pico GND
-```
+Firmware `0.6.0` turns Wi-Fi off between cards and holds the RC522 in reset so its antenna is off. It pauses for 300 ms, wakes, powers the reader just long enough to look for a card, then pauses again. A card chirps at once. Wi-Fi and MQTT come up after that, so the door usually opens a few seconds later than it did with the radio left on. It does not light-sleep, so the serial port stays up while the USB cable is plugged in.
 
-Charge only from the TP4056 USB socket, with a 5 V phone charger. The Pico’s own USB port is for programming. While that cable is plugged in, the reader runs from USB and Settings shows “Running from USB” instead of a percentage. Unplug it to see the cell.
-
-Do not tie the cell to 3V3 or to VBUS. 3V3 is a regulator output. VBUS is 5 V from USB, and a direct connection there would put 5 V across the cell. Do not use an unprotected cell, a second cell in series, or a 2S pack. VSYS must stay at or below 5.5 V.
-
-`DIODE_MV` in `battery.py` is 300, the typical drop of a 1N5819 at this current. Compare Settings with a meter on the cell. If Settings reads high by about 0.3 V, set `DIODE_MV` to 0. A check-in reads VSYS, adds that drop, and maps the result onto a light-load 18650 curve. Full is about 4.2 V. Empty is about 3.2 V. A charging cell reads high until the charger is unplugged.
-
-Firmware `0.5.0` sleeps between cards. Wi-Fi is off, and the RC522 is held in reset so its antenna is off. On the cell, the Pico light-sleeps for 300 ms, wakes, powers the reader just long enough to look for a card, then sleeps again. A card chirps at once. Wi-Fi and MQTT come up after that, so the door usually opens a few seconds later than it did with the radio left on. Plugged into USB, it uses ordinary pauses instead of light sleep, so the serial port stays up while you program it.
-
-The RC522 cannot see a card with the antenna off, and its IRQ pin is not wired to the Pico. Leaving the antenna on so a card could wake the chip would draw more than these short polls. A tap, or the 10-minute check-in, is what turns Wi-Fi on. That check-in refreshes the clock, the allowlist, the saved log, and the battery reading.
+The RC522 cannot see a card with the antenna off. IRQ is wired to GP27, and the firmware still polls, because the chip is held in reset between looks. A tap, or the 10-minute check-in, is what turns Wi-Fi on. That check-in refreshes the clock, the allowlist, and the saved log.
 
 Settings shows the reader as online and “asleep until a card”. A scan or a Wi-Fi change from Settings is refused while it is asleep. Hold the setup button for 3 seconds to change the network. Restart the server with this tree before relying on the longer offline window. An older server still marks a silent reader offline after 90 seconds and will send a Telegram message each check-in.
-
-A reader that stayed on Wi-Fi drew roughly 70–100 mA. Asleep, the radio and the antenna are off, so a 2500 mAh cell should last several times longer. How much longer depends on how often cards are read and on whether this MicroPython build actually light-sleeps. If the board stops responding after the flash, install a current Pico W MicroPython UF2 and copy the files again. The protection board cuts the cell off near 2.5 V. Recharge before the level sits at 15%, because a cutoff needs Wi-Fi and NTP again before the next offline decision.
-
-Firmware `0.4.0` publishes `power`, and on battery also `battery_mv` and `battery_pct`, in the retained status. Settings shows that on the next check-in.
 
 ## Flash
 
@@ -59,11 +43,11 @@ From this folder, with the Pico plugged into USB:
 
 ```bash
 python3 check_policy.py
-mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py wifi_store.py setup_ap.py ui.py battery.py secrets.py main.py :
+mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py wifi_store.py setup_ap.py ui.py secrets.py main.py :
 mpremote reset
 ```
 
-Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. Firmware `0.4.1` reads the 18650 level. Firmware `0.5.0` turns Wi-Fi off between cards. On a Pico W that sense pin is also the wireless clock, so the sample switches the pin for a moment and then hands it back. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
+Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. Firmware `0.5.0` turns Wi-Fi off between cards. Firmware `0.6.0` drops the cell and runs from the 5 V converter. Firmware `0.6.1` moves the RC522 to GP20, GP21, GP22, GP26, GP27, and GP28. Those SPI pins are bit-banged. Delete `battery.py` from the Pico if a previous copy left it there. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
 
 Reload Mosquitto after installing the ACL in `contract/mosquitto/acl`. The reader has to be allowed to subscribe to `door/reader/wifi`, or the Settings page can send a network the Pico never receives.
 

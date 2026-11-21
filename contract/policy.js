@@ -13,7 +13,7 @@ const LIMITS = {
   HEARTBEAT_S: 30,
   MQTT_KEEPALIVE_S: 60,
   OFFLINE_AFTER_S: 90,
-  // Reader firmware 0.5.0 sleeps with Wi-Fi off and says sleeping:true.
+  // Reader firmware 0.6.0 turns Wi-Fi off between cards and says sleeping:true.
   // Two missed 10-minute check-ins, plus margin, before it is offline.
   READER_SLEEP_OFFLINE_S: 1500,
   OPEN_DEFAULT_MS: 3000,

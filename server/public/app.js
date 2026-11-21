@@ -18,8 +18,6 @@
     if (device.ip) bits.push(device.ip);
     if (device.fw) bits.push('firmware ' + device.fw);
     if (device.rssi != null) bits.push(device.rssi + ' dBm');
-    if (device.power === 'usb') bits.push('USB power');
-    else if (device.power === 'battery' && device.batteryPct != null) bits.push('battery ' + device.batteryPct + '%');
     if (device.allowlist != null) bits.push('allowlist ' + device.allowlist);
     if (device.relay) bits.push('relay ' + device.relay);
     if (device.logQueued) bits.push(device.logQueued + ' logs queued');

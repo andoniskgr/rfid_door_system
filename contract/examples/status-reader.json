@@ -10,8 +10,5 @@
   "rssi": -62,
   "ntp": true,
   "allowlist_version": 3,
-  "log_queued": 0,
-  "power": "battery",
-  "battery_mv": 3920,
-  "battery_pct": 70
+  "log_queued": 0
 }

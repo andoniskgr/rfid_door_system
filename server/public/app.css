@@ -84,15 +84,6 @@ input, select {
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-.meter {
-  max-width: 16rem;
-  height: 0.55rem;
-  border-radius: 99px;
-  background: var(--line);
-  overflow: hidden;
-}
-.meter span { display: block; height: 100%; background: var(--ok); }
-.meter.low span { background: var(--bad); }
 .ok { color: var(--ok); font-weight: 600; }
 .bad { color: var(--bad); font-weight: 600; }
 .muted { color: var(--muted); }

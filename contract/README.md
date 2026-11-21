@@ -103,7 +103,7 @@ Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time.
 
 The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). The server attaches `result.reason` when a result with that id arrives.
 
-**Status**, retained. The actuator publishes it every 30 seconds. Reader firmware 0.5.0 publishes it when a card is read and about every 10 minutes, with `sleeping` set to `true`, then turns Wi-Fi off. A clean disconnect does not send the Last Will. The server keeps that reader online for 25 minutes, so a missed check-in does not page you. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. It also adds `power` as `battery`, `usb`, or `unknown`. On battery it adds `battery_mv` (cell millivolts, diode drop included) and `battery_pct` from 0 to 100. Those two are omitted on USB, because VSYS is then the USB rail and the cell is hidden. Actuator example adds `relay` as `off` or `on`.
+**Status**, retained. The actuator publishes it every 30 seconds. Reader firmware 0.6.0 publishes it when a card is read and about every 10 minutes, with `sleeping` set to `true`, then turns Wi-Fi off. A clean disconnect does not send the Last Will. The server keeps that reader online for 25 minutes, so a missed check-in does not page you. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. Actuator example adds `relay` as `off` or `on`.
 
 **Wi-Fi** `door/reader/wifi`, not retained. The server publishes it and the reader subscribes. The password crosses the LAN once and is not stored on the broker or the Pi. `ssid` is 1–32 characters. `password` is empty for an open network, or 8–63 characters. `setup_password` is 8–63 characters.
 
@@ -180,7 +180,7 @@ A broken `sch` does not grant. Disabled tags are left out of the allowlist, so t
 2. If feedback arrives, it shows the result and does not send an open command. On a grant, the server publishes `door/actuator/open` and writes the log.
 3. If feedback does not arrive and the Pico has NTP, it checks the cached allowlist and publishes `door/reader/local`. On a grant it also publishes a signed open command.
 4. If the broker connection is down, it still evaluates the allowlist and appends the event to the flash log. It holds a signed open command only until `ts + 30`. If the broker returns inside that window, it publishes the command. After 30 seconds it drops the command, stores reason `not_actuated`, and the door stays closed.
-5. With no NTP time, the offline result is `time_unsynced` and the door stays closed. The Pico has no battery-backed clock, so the first decision after power returns needs Wi-Fi and NTP even when a cached allowlist is present.
+5. With no NTP time, the offline result is `time_unsynced` and the door stays closed. The Pico clock stops when power is removed, so the first decision after power returns needs Wi-Fi and NTP even when a cached allowlist is present.
 6. On reconnect it uploads queued logs in batches and clears a batch only after the broker accepts it.
 7. If the server and the Pico both publish an open for the same tap, the actuator pulses once. The second command receives `busy` while the pulse is running. The server skips its own open when a local decision for that read id arrives with `open_id` set.
 
