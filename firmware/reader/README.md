@@ -2,7 +2,7 @@
 
 MicroPython for the entrance reader. It reads a MIFARE UID from the RC522, publishes `door/reader/uid`, and waits 1.2 seconds for the server. If the server answers, the LED and buzzer follow that answer and the Pico does not send an open command. If the server does not answer, the Pico uses the cached allowlist. A local grant publishes a signed `door/actuator/open`. Nothing pulses the relay until the ESP-01 is running.
 
-The same UID is ignored for 2 seconds. A retained status is published every 30 seconds. The last will is `{"online":false,"reason":"lwt"}`. While the broker is down, decisions are stored on the Pico and uploaded in batches after it reconnects. A signed open is kept for 30 seconds and then dropped.
+The same UID is ignored for 2 seconds. Between taps the radio is off. A retained status, with `sleeping` set, is published on a tap and about every 10 minutes. The last will is `{"online":false,"reason":"lwt"}`, and a clean disconnect does not send it. While the broker is down, decisions are stored on the Pico and uploaded in batches the next time it connects. A signed open is kept for 30 seconds and then dropped.
 
 ## Wiring
 
@@ -39,11 +39,17 @@ Charge only from the TP4056 USB socket, with a 5 V phone charger. The Pico’s o
 
 Do not tie the cell to 3V3 or to VBUS. 3V3 is a regulator output. VBUS is 5 V from USB, and a direct connection there would put 5 V across the cell. Do not use an unprotected cell, a second cell in series, or a 2S pack. VSYS must stay at or below 5.5 V.
 
-`DIODE_MV` in `battery.py` is 300, the typical drop of a 1N5819 at this current. Compare Settings with a meter on the cell. If Settings reads high by about 0.3 V, set `DIODE_MV` to 0. Each heartbeat reads VSYS, adds that drop, and maps the result onto a light-load 18650 curve. Full is about 4.2 V. Empty is about 3.2 V. A charging cell reads high until the charger is unplugged.
+`DIODE_MV` in `battery.py` is 300, the typical drop of a 1N5819 at this current. Compare Settings with a meter on the cell. If Settings reads high by about 0.3 V, set `DIODE_MV` to 0. A check-in reads VSYS, adds that drop, and maps the result onto a light-load 18650 curve. Full is about 4.2 V. Empty is about 3.2 V. A charging cell reads high until the charger is unplugged.
 
-A reader that stays on Wi-Fi draws roughly 70–100 mA with the RC522. A healthy 2500 mAh cell lasts about a day. The protection board cuts the cell off near 2.5 V. Recharge before the level sits at 15%, because a cutoff needs Wi-Fi and NTP again before the next offline decision.
+Firmware `0.5.0` sleeps between cards. Wi-Fi is off, and the RC522 is held in reset so its antenna is off. On the cell, the Pico light-sleeps for 300 ms, wakes, powers the reader just long enough to look for a card, then sleeps again. A card chirps at once. Wi-Fi and MQTT come up after that, so the door usually opens a few seconds later than it did with the radio left on. Plugged into USB, it uses ordinary pauses instead of light sleep, so the serial port stays up while you program it.
 
-Firmware `0.4.0` publishes `power`, and on battery also `battery_mv` and `battery_pct`, in the retained status. Settings shows that on the next heartbeat.
+The RC522 cannot see a card with the antenna off, and its IRQ pin is not wired to the Pico. Leaving the antenna on so a card could wake the chip would draw more than these short polls. A tap, or the 10-minute check-in, is what turns Wi-Fi on. That check-in refreshes the clock, the allowlist, the saved log, and the battery reading.
+
+Settings shows the reader as online and “asleep until a card”. A scan or a Wi-Fi change from Settings is refused while it is asleep. Hold the setup button for 3 seconds to change the network. Restart the server with this tree before relying on the longer offline window. An older server still marks a silent reader offline after 90 seconds and will send a Telegram message each check-in.
+
+A reader that stayed on Wi-Fi drew roughly 70–100 mA. Asleep, the radio and the antenna are off, so a 2500 mAh cell should last several times longer. How much longer depends on how often cards are read and on whether this MicroPython build actually light-sleeps. If the board stops responding after the flash, install a current Pico W MicroPython UF2 and copy the files again. The protection board cuts the cell off near 2.5 V. Recharge before the level sits at 15%, because a cutoff needs Wi-Fi and NTP again before the next offline decision.
+
+Firmware `0.4.0` publishes `power`, and on battery also `battery_mv` and `battery_pct`, in the retained status. Settings shows that on the next check-in.
 
 ## Flash
 
@@ -57,13 +63,13 @@ mpremote cp pins.py crypto_util.py policy.py mqtt_client.py mfrc522.py store.py 
 mpremote reset
 ```
 
-Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. Firmware `0.4.0` adds the 18650 level. Use a Pico W MicroPython build from 2023 or later so `ADC(3)` can read VSYS without dropping Wi-Fi. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
+Thonny can save the same files to the board instead. `main.py` runs on power-up. Firmware `0.3.0` scans for networks and can change Wi-Fi without another copy. Firmware `0.4.1` reads the 18650 level. Firmware `0.5.0` turns Wi-Fi off between cards. On a Pico W that sense pin is also the wireless clock, so the sample switches the pin for a moment and then hands it back. An offline grant uses `open_ms` from the allowlist when the server has published one. `OPEN_MS` in `secrets.py` is the fallback until then.
 
 Reload Mosquitto after installing the ACL in `contract/mosquitto/acl`. The reader has to be allowed to subscribe to `door/reader/wifi`, or the Settings page can send a network the Pico never receives.
 
 ## Change Wi-Fi
 
-Settings, while the reader is online, can scan and list the networks the Pico can see. Choose one and enter its password. The Pico stores the choice in `/wifi.json` and joins. If the new network refuses the join, it goes back to the previous one. The password is not kept on the Pi. The setup page at `http://192.168.4.1` shows the same kind of list, with a Scan again link.
+Settings, while the reader is on a check-in, can scan and list the networks the Pico can see. Firmware 0.5.0 is asleep between cards, and Settings refuses a scan or a network change until you hold the setup button. Choose one and enter its password. The Pico stores the choice in `/wifi.json` and joins. If the new network refuses the join, it goes back to the previous one. The password is not kept on the Pi. The setup page at `http://192.168.4.1` shows the same kind of list, with a Scan again link.
 
 Reset Wi-Fi clears `/wifi.json` and the Pico broadcasts `Door-Setup` for 10 minutes. The page shows a one-time password. Join that network from a phone, open `http://192.168.4.1`, and enter the new network. Then put the phone back on the home Wi-Fi.
 

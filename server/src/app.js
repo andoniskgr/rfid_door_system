@@ -746,7 +746,7 @@ function wifiStatus(err) {
   if (!err) return 0;
   if (err.code === 'BAD_WIFI') return 400;
   if (err.code === 'TIMEOUT') return 504;
-  if (err.code === 'NO_MQTT' || err.code === 'OFFLINE' || err.code === 'OLD_FW') return 409;
+  if (err.code === 'NO_MQTT' || err.code === 'OFFLINE' || err.code === 'OLD_FW' || err.code === 'ASLEEP') return 409;
   return 0;
 }
 

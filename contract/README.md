@@ -12,9 +12,9 @@ Clients use a clean session, MQTT keepalive **60 seconds**, and QoS 1. The tools
 |---|---|---|
 | Online wait | 1200 ms | Pico waits this long for feedback, then decides locally |
 | UID debounce | 2000 ms | Same UID is ignored for this long |
-| Heartbeat | 30 s | Retained status publish |
+| Heartbeat | 30 s | Actuator retained status. The reader sleeps and checks in about every 10 minutes instead |
 | MQTT keepalive | 60 s | Broker publishes the Last Will about 90 s after a hard drop |
-| Offline threshold | 90 s | Server treats a silent device as offline |
+| Offline threshold | 90 s | Server treats a silent device as offline. A reader status with `sleeping: true` is allowed 25 minutes |
 | Open pulse | 3000 ms | Starting value. Settings can set 200–10000. The ESP-01 will not go past 10000 |
 | Hard maximum | 10000 ms | Compiled into the ESP-01. A command cannot raise it |
 | Clock window | ±30 s | Open command `ts` against the actuator clock |
@@ -103,7 +103,7 @@ Omit `exp` for no expiry. Omit `sch` for all hours. `exp` is absolute Unix time.
 
 The access log keeps the decision reason (`ok`, `manual`, `offline_ok`, …). The server attaches `result.reason` when a result with that id arrives.
 
-**Status**, retained, every 30 seconds. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. It also adds `power` as `battery`, `usb`, or `unknown`. On battery it adds `battery_mv` (cell millivolts, diode drop included) and `battery_pct` from 0 to 100. Those two are omitted on USB, because VSYS is then the USB rail and the cell is hidden. Actuator example adds `relay` as `off` or `on`.
+**Status**, retained. The actuator publishes it every 30 seconds. Reader firmware 0.5.0 publishes it when a card is read and about every 10 minutes, with `sleeping` set to `true`, then turns Wi-Fi off. A clean disconnect does not send the Last Will. The server keeps that reader online for 25 minutes, so a missed check-in does not page you. Reader example adds `ssid`, `allowlist_version`, and `log_queued`. It also adds `power` as `battery`, `usb`, or `unknown`. On battery it adds `battery_mv` (cell millivolts, diode drop included) and `battery_pct` from 0 to 100. Those two are omitted on USB, because VSYS is then the USB rail and the cell is hidden. Actuator example adds `relay` as `off` or `on`.
 
 **Wi-Fi** `door/reader/wifi`, not retained. The server publishes it and the reader subscribes. The password crosses the LAN once and is not stored on the broker or the Pi. `ssid` is 1–32 characters. `password` is empty for an open network, or 8–63 characters. `setup_password` is 8–63 characters.
 

@@ -23,6 +23,7 @@
     if (device.allowlist != null) bits.push('allowlist ' + device.allowlist);
     if (device.relay) bits.push('relay ' + device.relay);
     if (device.logQueued) bits.push(device.logQueued + ' logs queued');
+    if (device.sleeping) bits.push('asleep until a card');
     return '<article class="card"><h2>' + esc(device.title) + '</h2>'
       + '<p class="' + (device.online ? 'ok' : 'bad') + '">' + (device.online ? 'Online' : 'Offline') + '</p>'
       + '<p>Last heartbeat: ' + esc(device.lastSeen) + '</p>'

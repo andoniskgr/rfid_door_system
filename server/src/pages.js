@@ -137,6 +137,7 @@ function deviceCard(device) {
   if (device.allowlist != null) bits.push(`allowlist ${device.allowlist}`);
   if (device.relay) bits.push(`relay ${device.relay}`);
   if (device.logQueued) bits.push(`${device.logQueued} logs queued`);
+  if (device.sleeping) bits.push('asleep until a card');
   return `<article class="card">
     <h2>${esc(device.title)}</h2>
     <p class="${device.online ? 'ok' : 'bad'}">${device.online ? 'Online' : 'Offline'}</p>
@@ -371,8 +372,9 @@ function readerPower(reader) {
   const volts = reader.batteryMv != null ? `${(reader.batteryMv / 1000).toFixed(2)} V` : '';
   let state;
   let meter = '';
+  const supply = reader.vsysMv != null ? `${(reader.vsysMv / 1000).toFixed(2)} V` : '';
   if (reader.power === 'usb') {
-    state = 'Running from USB. The 18650 voltage is hidden until that cable is unplugged. The Pico USB port does not charge the cell.';
+    state = `Running from USB${supply ? ` at ${supply}` : ''}. The 18650 level shows up after that cable is unplugged. The Pico USB port does not charge the cell.`;
   } else if (reader.power === 'battery' && reader.batteryPct != null) {
     const tone = reader.batteryPct <= 15 ? 'bad' : 'ok';
     const level = `${reader.batteryPct}%${volts ? ` · ${volts}` : ''}`;
@@ -381,7 +383,7 @@ function readerPower(reader) {
   } else if (reader.power === 'battery') {
     state = 'The reader is on battery but did not send a level.';
   } else if (reader.power === 'unknown') {
-    state = 'The reader could not measure the supply voltage.';
+    state = `The reader could not measure a battery or USB voltage${supply ? ` (${supply})` : ''}.`;
   } else {
     state = 'No battery report yet. Copy battery.py and the updated main.py to the Pico, then reset it. The level shows up on the next heartbeat.';
   }

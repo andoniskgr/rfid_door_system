@@ -26,6 +26,7 @@ REG_TIMER_MODE = 0x2A
 REG_TIMER_PRESCALER = 0x2B
 REG_TIMER_RELOAD_HI = 0x2C
 REG_TIMER_RELOAD_LO = 0x2D
+REG_VERSION = 0x37
 
 OK = 0
 ERR = 2
@@ -41,6 +42,21 @@ class MFRC522:
         time.sleep_ms(50)
         self.rst.value(1)
         time.sleep_ms(50)
+        self._init()
+
+    def power_down(self):
+        # RST low is the chip's hard power-down. The antenna driver stops,
+        # which is most of this board's idle current.
+        if self.rst.value():
+            try:
+                self._antenna_off()
+            except Exception:
+                pass
+        self.rst.value(0)
+
+    def power_up(self):
+        self.rst.value(1)
+        time.sleep_ms(4)
         self._init()
 
     def read_uid(self):
@@ -66,7 +82,9 @@ class MFRC522:
 
     def _init(self):
         self._wreg(REG_COMMAND, CMD_SOFT_RESET)
-        time.sleep_ms(50)
+        time.sleep_ms(8)
+        if self._rreg(REG_VERSION) in (0x00, 0xFF):
+            time.sleep_ms(30)
         self._wreg(REG_TIMER_MODE, 0x8D)
         self._wreg(REG_TIMER_PRESCALER, 0x3E)
         self._wreg(REG_TIMER_RELOAD_LO, 30)
@@ -96,6 +114,9 @@ class MFRC522:
     def _antenna_on(self):
         if (self._rreg(REG_TX_CONTROL) & 0x03) != 0x03:
             self._set(REG_TX_CONTROL, 0x03)
+
+    def _antenna_off(self):
+        self._clr(REG_TX_CONTROL, 0x03)
 
     def _crc(self, data):
         self._clr(REG_DIV_IRQ, 0x04)

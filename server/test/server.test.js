@@ -540,6 +540,42 @@ test('repeated denies and device changes notify telegram when enabled', async ()
   }
 });
 
+test('a sleeping reader stays online past 90 seconds and refuses a remote Wi-Fi scan', async () => {
+  const clock = { t: 1700000000 };
+  const ctx = await start({
+    env: { TELEGRAM_BOT_TOKEN: 'token', TELEGRAM_CHAT_ID: '42' },
+    now: () => clock.t,
+  });
+  try {
+    ctx.door.handle('door/reader/status', {
+      schema: 1,
+      id: '11111111111111111111111111111111',
+      online: true,
+      sleeping: true,
+      ts: clock.t,
+      fw: '0.5.0',
+    });
+    clock.t += 120;
+    ctx.door.sweep();
+    const asleep = ctx.door.snapshot().devices.find((item) => item.role === 'reader');
+    assert.equal(asleep.online, true);
+    assert.equal(asleep.sleeping, true);
+    assert.equal(ctx.sent.some((item) => item.text.includes('Entrance reader is offline')), false);
+    await assert.rejects(() => ctx.door.scanReaderWifi(), /setup button/);
+
+    clock.t += 1380;
+    ctx.door.sweep();
+    assert.equal(ctx.door.snapshot().devices.find((item) => item.role === 'reader').online, true);
+
+    clock.t += 1;
+    ctx.door.sweep();
+    assert.equal(ctx.door.snapshot().devices.find((item) => item.role === 'reader').online, false);
+    assert.ok(ctx.sent.some((item) => item.text.includes('Entrance reader is offline')));
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('the log filters, paginates, and exports csv', async () => {
   const ctx = await start();
   try {
@@ -998,6 +1034,7 @@ test('settings shows the reader battery from status', async () => {
       power: 'battery',
       battery_mv: 3920,
       battery_pct: 70,
+      sleeping: true,
     });
     let html = await (await ctx.agent.fetch('/settings')).text();
     assert.match(html, /Reader battery/);
@@ -1006,6 +1043,7 @@ test('settings shows the reader battery from status', async () => {
 
     const live = await (await ctx.agent.fetch('/')).text();
     assert.match(live, /battery 70%/);
+    assert.match(live, /asleep until a card/);
 
     ctx.door.handle('door/reader/status', {
       schema: 1,
@@ -1014,12 +1052,15 @@ test('settings shows the reader battery from status', async () => {
       ts: Math.floor(Date.now() / 1000),
       fw: '0.4.0',
       power: 'usb',
+      vsys_mv: 4580,
       battery_mv: 3920,
       battery_pct: 70,
     });
     html = await (await ctx.agent.fetch('/settings')).text();
-    assert.match(html, /Running from USB/);
+    assert.match(html, /Running from USB at 4\.58 V/);
     assert.doesNotMatch(html, /70%/);
+    const awake = await (await ctx.agent.fetch('/')).text();
+    assert.doesNotMatch(awake, /asleep until a card/);
   } finally {
     await ctx.close();
   }

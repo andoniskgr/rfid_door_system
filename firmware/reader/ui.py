@@ -35,6 +35,10 @@ class Ui:
         self.green.value(level)
         self.red.value(level)
 
+    def tick(self):
+        # Heard as soon as the card is read, before Wi-Fi comes up.
+        self._beep(2000, 30)
+
     def show(self, granted):
         led = self.green if granted else self.red
         led.value(_level(True))
@@ -60,5 +64,8 @@ class Ui:
     def _quiet(self):
         try:
             self.buzzer.duty_u16(0)
-        except AttributeError:
-            self.buzzer.value(_level(False))
+        except Exception:
+            try:
+                self.buzzer.value(_level(False))
+            except Exception:
+                pass

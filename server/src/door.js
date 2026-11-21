@@ -275,7 +275,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     const prev = dbApi.getDevice(db, role);
     const lwt = msg.online === false && msg.reason === 'lwt';
     const ts = now();
-    const stale = Number.isInteger(msg.ts) && ts - msg.ts > LIMITS.OFFLINE_AFTER_S;
+    const stale = Number.isInteger(msg.ts) && ts - msg.ts > offlineAfter(role, msg);
     const online = msg.online === true && !stale && !lwt;
     const first = prev.payload == null;
     dbApi.updateDevice(db, role, {
@@ -317,7 +317,7 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     let changed = false;
     for (const row of dbApi.listDevices(db)) {
       if (!row.online || !row.last_seen) continue;
-      if (ts - row.last_seen <= LIMITS.OFFLINE_AFTER_S) continue;
+      if (ts - row.last_seen <= offlineAfter(row.role, storedPayload(row))) continue;
       dbApi.updateDevice(db, row.role, { online: false, lastSeen: row.last_seen, payload: row.payload });
       const name = row.role === 'reader' ? 'Entrance reader' : 'Door relay';
       telegram.notify('device', `${name} is offline.`);
@@ -389,6 +389,21 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
     return value;
   }
 
+  function storedPayload(row) {
+    if (!row || typeof row.payload !== 'string' || !row.payload) return {};
+    try {
+      const parsed = JSON.parse(row.payload);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function offlineAfter(role, msg) {
+    if (role === 'reader' && msg && msg.sleeping === true) return LIMITS.READER_SLEEP_OFFLINE_S;
+    return LIMITS.OFFLINE_AFTER_S;
+  }
+
   function deviceState(role) {
     const row = dbApi.getDevice(db, role);
     let payload = {};
@@ -417,6 +432,11 @@ function createDoor({ db, config, transport, telegram, hub, now = () => Math.flo
         ? 'The actuator is offline, so it cannot take a new network. Power-cycle it if it has no saved network.'
         : 'The reader is offline, so it cannot take a new network. Hold the setup button at the door, or power-cycle the reader if it has no saved network.');
       err.code = 'OFFLINE';
+      throw err;
+    }
+    if (role === 'reader' && storedPayload(dbApi.getDevice(db, 'reader')).sleeping === true) {
+      const err = new Error('The reader is asleep unless a card is at the door, so it cannot scan or change Wi-Fi from here. Hold the setup button at the door for 3 seconds.');
+      err.code = 'ASLEEP';
       throw err;
     }
     if (!firmwareCanSetWifi(device.fw, minor)) {

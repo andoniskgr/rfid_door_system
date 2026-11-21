@@ -4,7 +4,12 @@ from crypto_util import hmac_hex, random_id
 
 ONLINE_WAIT_MS = 1200
 UID_DEBOUNCE_MS = 2000
+# The actuator still publishes every 30 seconds. The reader sleeps, so it
+# checks in on MAINTAIN_S instead. The server allows that when status says sleeping.
 HEARTBEAT_S = 30
+IDLE_POLL_MS = 300
+MAINTAIN_S = 600
+LINK_RETRY_S = 30
 KEEPALIVE_S = 60
 OPEN_SKEW_S = 30
 ALLOWLIST_MAX = 100

@@ -1,9 +1,14 @@
 # Pico W entrance reader. A tap publishes the UID. The door stays closed
 # until the ESP-01 actuator is listening for door/actuator/open.
+#
+# Between taps the radio is off and the RC522 is held in reset. The Pico
+# polls for a card every few hundred milliseconds, then sleeps again.
+# Wi-Fi comes up only for a tap or a periodic check-in.
 
 import json
 import time
 
+import machine
 import network
 import ntptime
 from machine import PWM, Pin, SPI
@@ -17,8 +22,10 @@ from crypto_util import random_id
 from mfrc522 import MFRC522
 from mqtt_client import MqttClient
 from policy import (
-    HEARTBEAT_S,
+    IDLE_POLL_MS,
+    LINK_RETRY_S,
     LOG_BATCH,
+    MAINTAIN_S,
     ONLINE_WAIT_MS,
     OPEN_SKEW_S,
     UID_DEBOUNCE_MS,
@@ -28,7 +35,7 @@ from policy import (
 from store import Store
 from ui import Ui
 
-FW = "0.4.0"
+FW = "0.5.0"
 CLIENT_ID = "door-reader"
 
 
@@ -93,7 +100,7 @@ class Clock:
 
 class Reader:
     def __init__(self):
-        self.wlan = network.WLAN(network.STA_IF)
+        self.wlan = None
         self.clock = Clock()
         self.store = Store()
         self.mqtt = MqttClient(
@@ -123,7 +130,9 @@ class Reader:
             Pin(pins.SDA, Pin.OUT, value=1),
             Pin(pins.RST, Pin.OUT, value=1),
         )
+        self.rfid.power_down()
         self.boot = time.ticks_ms()
+        self.fast_hz = machine.freq()
         self.ssid, self.password = wifi_store.load(secrets)
         self.wifi_cmd = None
         self.scan_report = None
@@ -140,6 +149,15 @@ class Reader:
         self.last_uid_at = 0
         self.holding = None
         self.feedback = {}
+        self.radio = False
+        self.sleep_ok = True
+        self.on_battery = False
+        self.power_at = 0
+        self.ui_on = True
+        self.wall_base = None
+        self.slept_ms = 0
+        self.link_at = time.ticks_ms()
+        self.link_gap = 0
 
     def run(self):
         print("door reader", FW)
@@ -151,29 +169,271 @@ class Reader:
                 print("setup", err)
         while True:
             try:
-                self._turn()
+                self._idle_once()
             except Exception as err:
                 print("loop", err)
                 time.sleep_ms(200)
 
-    def _turn(self):
-        self._take_wifi_cmd()
+    def _idle_once(self):
         self._check_setup_button()
-        self._ensure_wifi()
-        self._ensure_ntp()
-        self._ensure_mqtt()
-        if self.mqtt.connected:
+        if self._link_due():
+            self._session(None)
+            return
+        uid = self._probe()
+        if uid and self._accept_uid(uid):
+            print("tap", uid)
+            self._ui_wake()
+            self.ui.tick()
+            self._session(uid)
+            return
+        self._nap(IDLE_POLL_MS)
+
+    def _link_due(self):
+        return time.ticks_diff(time.ticks_ms(), self.link_at) >= self.link_gap
+
+    def _session(self, uid):
+        # One radio window: a tap, or the periodic allowlist and battery check.
+        self._ui_wake()
+        connected = False
+        try:
+            if self.ssid:
+                self._radio_on()
+                self.wifi_try = 0
+                self.ntp_try = 0
+                self.mqtt_try = 0
+                self._ensure_wifi()
+                connected = self._wlan().isconnected()
+                if connected:
+                    self._ensure_ntp()
+                    self._ensure_mqtt()
+                    if self.mqtt.connected:
+                        try:
+                            self.mqtt.poll(400)
+                        except OSError as err:
+                            print("mqtt", err)
+                            self.mqtt.close()
+                    self._take_wifi_cmd()
+            if uid:
+                try:
+                    self._on_tap(uid)
+                except Exception as err:
+                    print("tap failed", err)
+            while self.holding is not None:
+                self._service_hold()
+                if self.holding is None:
+                    break
+                if self.ssid and not self.mqtt.connected:
+                    self._ensure_wifi()
+                    self._ensure_mqtt()
+                    connected = self.wlan is not None and self.wlan.isconnected()
+                if self.mqtt.connected:
+                    try:
+                        self.mqtt.poll(50)
+                    except OSError as err:
+                        print("mqtt", err)
+                        self.mqtt.close()
+                time.sleep_ms(50)
+            if self.mqtt.connected:
+                self._flush_logs()
+                self._publish_status()
+                self.status_at = time.ticks_ms()
+                connected = True
+        finally:
+            if connected:
+                self.link_at = time.ticks_ms()
+                self.link_gap = MAINTAIN_S * 1000
+            elif self.ssid:
+                self.link_at = time.ticks_ms()
+                self.link_gap = LINK_RETRY_S * 1000
+            else:
+                self.link_at = time.ticks_ms()
+                self.link_gap = MAINTAIN_S * 1000
+            self._radio_off()
+
+    def _probe(self):
+        try:
+            self._bus()
+            self.rfid.power_up()
+            return self.rfid.read_uid()
+        except Exception as err:
+            print("rfid", err)
+            return None
+        finally:
             try:
-                self.mqtt.poll(20)
-            except OSError as err:
-                print("mqtt", err)
-                self.mqtt.close()
-        self._service_hold()
-        self._upload()
-        if time.ticks_diff(time.ticks_ms(), self.status_at) >= HEARTBEAT_S * 1000:
-            self._publish_status()
-            self.status_at = time.ticks_ms()
-        self._read_card()
+                self.rfid.power_down()
+            except Exception:
+                pass
+
+    def _bus(self):
+        try:
+            self.spi.init(baudrate=1000000, polarity=0, phase=0)
+        except Exception:
+            self.spi = SPI(
+                0,
+                baudrate=1000000,
+                polarity=0,
+                phase=0,
+                sck=Pin(pins.SCK),
+                mosi=Pin(pins.MOSI),
+                miso=Pin(pins.MISO),
+            )
+            self.rfid.spi = self.spi
+
+    def _nap(self, ms):
+        self._radio_off()
+        try:
+            self.rfid.power_down()
+        except Exception:
+            pass
+        self._ui_sleep()
+        self._sample_power()
+        self._slow()
+        if not self.sleep_ok or not self.on_battery:
+            time.sleep_ms(ms)
+            return
+        mark = time.ticks_ms()
+        try:
+            machine.lightsleep(ms)
+        except Exception as err:
+            print("sleep", err)
+            self.sleep_ok = False
+            time.sleep_ms(ms)
+            return
+        elapsed = time.ticks_diff(time.ticks_ms(), mark)
+        if elapsed < ms // 2:
+            print("sleep unavailable")
+            self.sleep_ok = False
+            return
+        self._note_sleep(elapsed)
+
+    def _note_sleep(self, elapsed):
+        # time.time() is whole seconds. If light sleep freezes it, catch up
+        # once the gap is larger than that rounding.
+        if not self.clock.synced:
+            return
+        if self.wall_base is None:
+            self.wall_base = time.time()
+            self.slept_ms = 0
+            return
+        self.slept_ms += elapsed
+        wall_ms = (time.time() - self.wall_base) * 1000
+        if wall_ms < 0:
+            self.wall_base = time.time()
+            self.slept_ms = 0
+            return
+        lag = self.slept_ms - wall_ms
+        if lag < 2000:
+            return
+        step = lag // 1000
+        self._catch_clock(time.time() + step)
+        self.wall_base = time.time()
+        self.slept_ms = 0
+
+    def _catch_clock(self, unix):
+        if unix < 1600000000:
+            return
+        parts = time.gmtime(int(unix))
+        try:
+            machine.RTC().datetime((
+                parts[0], parts[1], parts[2], parts[6],
+                parts[3], parts[4], parts[5], 0,
+            ))
+        except Exception as err:
+            print("clock", err)
+
+    def _sample_power(self):
+        if self.power_at and not self._due(self.power_at, 15000):
+            return
+        sample = battery.read()
+        battery.park()
+        self.power_at = time.ticks_ms()
+        self.on_battery = sample.get("power") == "battery"
+
+    def _wlan(self):
+        if self.wlan is None:
+            self.wlan = network.WLAN(network.STA_IF)
+        return self.wlan
+
+    def _radio_on(self):
+        self._fast()
+        self.radio = True
+        try:
+            self._wlan().active(True)
+        except OSError as err:
+            print("wifi", err)
+
+    def _radio_off(self):
+        self.mqtt.close()
+        wlan = self.wlan
+        self.wlan = None
+        if wlan is not None or self.radio:
+            if wlan is None:
+                try:
+                    wlan = network.WLAN(network.STA_IF)
+                except OSError:
+                    wlan = None
+            if wlan is not None:
+                try:
+                    wlan.disconnect()
+                except OSError:
+                    pass
+                try:
+                    wlan.active(False)
+                except OSError:
+                    pass
+                deinit = getattr(wlan, "deinit", None)
+                if callable(deinit):
+                    try:
+                        deinit()
+                    except Exception as err:
+                        print("wifi off", err)
+            try:
+                network.WLAN(network.AP_IF).active(False)
+            except OSError:
+                pass
+        self.radio = False
+        battery.park()
+        self._slow()
+
+    def _fast(self):
+        try:
+            if machine.freq() != self.fast_hz:
+                machine.freq(self.fast_hz)
+        except Exception as err:
+            print("freq", err)
+
+    def _slow(self):
+        if not self.on_battery or self.radio:
+            return
+        try:
+            if machine.freq() != 48000000:
+                machine.freq(48000000)
+        except Exception as err:
+            print("freq", err)
+
+    def _ui_wake(self):
+        if self.ui_on:
+            return
+        self.ui.buzzer = PWM(Pin(pins.BUZZER))
+        self.ui_on = True
+
+    def _ui_sleep(self):
+        self.ui.off()
+        try:
+            self.ui.buzzer.deinit()
+        except Exception:
+            pass
+        self.ui_on = False
+
+    def _flush_logs(self):
+        for _ in range(5):
+            queued = len(self.store.entries_log)
+            if not queued or not self.mqtt.connected:
+                return
+            self.upload_at = 0
+            self._upload()
+            if len(self.store.entries_log) == queued:
+                return
 
     def _due(self, stamp, gap_ms):
         return time.ticks_diff(time.ticks_ms(), stamp) >= gap_ms
@@ -187,46 +447,49 @@ class Reader:
     def _join(self, timeout_ms):
         if not self.ssid:
             return False
+        self._radio_on()
+        wlan = self._wlan()
         self.mqtt.close()
         try:
-            self.wlan.disconnect()
+            wlan.disconnect()
         except OSError:
             pass
         try:
-            self.wlan.active(False)
+            wlan.active(False)
         except OSError:
             pass
         time.sleep_ms(100)
-        self.wlan.active(True)
+        wlan.active(True)
         time.sleep_ms(100)
         try:
-            self.wlan.connect(self.ssid, self.password)
+            wlan.connect(self.ssid, self.password)
         except OSError as err:
             print("wifi", err)
             return False
         deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
         while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-            if self.wlan.isconnected():
+            if wlan.isconnected():
                 return True
             try:
-                status = self.wlan.status()
+                status = wlan.status()
             except OSError:
                 status = 1
             if status in (-3, -2):
                 return False
             time.sleep_ms(200)
-        return self.wlan.isconnected()
+        return wlan.isconnected()
 
     def _ensure_wifi(self):
-        self.wlan.active(True)
-        if self.wlan.isconnected():
+        wlan = self._wlan()
+        wlan.active(True)
+        if wlan.isconnected():
             return
         self.mqtt.close()
         if not self.ssid or not self._due(self.wifi_try, 3000):
             return
         self.wifi_try = time.ticks_ms()
-        if self._join(5000):
-            print("wifi", self.wlan.ifconfig()[0])
+        if self._join(8000):
+            print("wifi", wlan.ifconfig()[0])
 
     def _set_wifi(self, ssid, password):
         previous = (self.ssid, self.password)
@@ -234,18 +497,21 @@ class Reader:
         self.password = password
         if self._join(20000):
             wifi_store.save(ssid, password)
-            print("wifi", self.wlan.ifconfig()[0])
+            print("wifi", self._wlan().ifconfig()[0])
             return
         print("wifi rejected")
         self.ssid, self.password = previous
         if previous[0] and self._join(15000):
-            print("wifi", self.wlan.ifconfig()[0])
+            print("wifi", self._wlan().ifconfig()[0])
 
     def _enter_setup(self, setup_password):
         previous = (self.ssid, self.password)
+        self.radio = True
+        self._fast()
+        self._ui_wake()
         self.mqtt.close()
         try:
-            self.wlan.disconnect()
+            self._wlan().disconnect()
         except OSError:
             pass
         started = time.ticks_ms()
@@ -261,7 +527,7 @@ class Reader:
             self.ssid, self.password = chosen
             if self._join(15000):
                 wifi_store.save(self.ssid, self.password)
-                print("wifi", self.wlan.ifconfig()[0])
+                print("wifi", self._wlan().ifconfig()[0])
                 joined = True
                 break
             print("wifi rejected")
@@ -271,13 +537,13 @@ class Reader:
             return
         self.ssid, self.password = previous
         if previous[0] and self._join(15000):
-            print("wifi", self.wlan.ifconfig()[0])
+            print("wifi", self._wlan().ifconfig()[0])
             return
         if not previous[0]:
             wifi_store.save("", "")
 
     def _publish_scan(self, scan_id):
-        networks = setup_ap.nearby_networks(self.wlan)
+        networks = setup_ap.nearby_networks(self._wlan())
         self.scan_report = {"id": scan_id, "networks": networks}
         print("scan", len(networks))
         self._publish_status()
@@ -329,16 +595,18 @@ class Reader:
         self._enter_setup(self._setup_ap_password())
 
     def _ensure_ntp(self):
-        if self.clock.synced or not self.wlan.isconnected():
+        if self.clock.synced or self.wlan is None or not self.wlan.isconnected():
             return
         if not self._due(self.ntp_try, 15000):
             return
         self.ntp_try = time.ticks_ms()
         if self.clock.sync():
+            self.wall_base = None
+            self.slept_ms = 0
             print("ntp", self.clock.unix())
 
     def _ensure_mqtt(self):
-        if self.mqtt.connected or not self.wlan.isconnected():
+        if self.mqtt.connected or self.wlan is None or not self.wlan.isconnected():
             return
         if not self._due(self.mqtt_try, 3000):
             return
@@ -377,20 +645,6 @@ class Reader:
                 self.feedback[read_id] = message
             return read_id
         return None
-
-    def _read_card(self):
-        try:
-            uid = self.rfid.read_uid()
-        except Exception as err:
-            print("rfid", err)
-            return
-        if not uid or not self._accept_uid(uid):
-            return
-        print("tap", uid)
-        try:
-            self._on_tap(uid)
-        except Exception as err:
-            print("tap failed", err)
 
     def _accept_uid(self, uid):
         now = time.ticks_ms()
@@ -525,7 +779,7 @@ class Reader:
             return
         ip = "0.0.0.0"
         rssi = 0
-        if self.wlan.isconnected():
+        if self.wlan is not None and self.wlan.isconnected():
             try:
                 ip = self.wlan.ifconfig()[0]
             except OSError:
@@ -550,13 +804,13 @@ class Reader:
             "ntp": self.clock.synced,
             "allowlist_version": self.store.version,
             "log_queued": len(self.store.entries_log),
+            "sleeping": True,
         }
         sample = battery.read()
         body["power"] = sample.get("power", "unknown")
-        if isinstance(sample.get("battery_mv"), int):
-            body["battery_mv"] = sample["battery_mv"]
-        if isinstance(sample.get("battery_pct"), int):
-            body["battery_pct"] = sample["battery_pct"]
+        for key in ("vsys_mv", "battery_mv", "battery_pct"):
+            if isinstance(sample.get(key), int):
+                body[key] = sample[key]
         report = self.scan_report
         if isinstance(report, dict):
             body["scan_id"] = report.get("id")

@@ -1,16 +1,18 @@
 # Cell voltage for one 18650 on VSYS.
-# Pico W divides VSYS by 3 into ADC channel 3. USB sits near 5 V on that
-# pin, so a high reading means the cable is powering the board and the
-# cell is hidden behind the external diode.
+# On Pico W, GPIO29 is the wireless SPI clock and the VSYS/3 sense pin.
+# GPIO25 is the SPI chip select, and holding it high connects the divider.
+# ADC(3) alone leaves GPIO29 as the clock, so the reading sits near 0 V.
 
-from machine import ADC
+import time
+from machine import ADC, Pin
 
 # Schottky drop from the cell to VSYS. A 1N5819 at this reader's current
 # is about 0.3 V. Use 0 when a meter on the cell matches VSYS.
 DIODE_MV = 300
 
-# VSYS at or above this is the USB rail, not the cell.
-USB_MV = 4400
+# VSYS at or above this is the USB rail. A single cell, even with no
+# diode, stays at or below 4.2 V.
+USB_MV = 4300
 
 # Light-load 18650 curve, millivolts to percent.
 _CURVE = (
@@ -28,17 +30,22 @@ _CURVE = (
     (3000, 0),
 )
 
-_adc = None
-
 
 def _vsys_mv():
-    global _adc
-    if _adc is None:
-        _adc = ADC(3)
-    total = 0
-    for _ in range(8):
-        total += _adc.read_u16()
-    return (total // 8) * 3300 * 3 // 65535
+    try:
+        Pin(25, Pin.OUT, value=1)
+        Pin(29, Pin.IN)
+        time.sleep_ms(2)
+        adc = ADC(29)
+        total = 0
+        for _ in range(4):
+            total += adc.read_u16()
+        return (total // 4) * 3300 * 3 // 65535
+    finally:
+        # Clock pin back to the wireless PIO. Chip select stays high,
+        # which is its idle level.
+        Pin(29, Pin.ALT, alt=7, pull=Pin.PULL_DOWN)
+        Pin(25, Pin.OUT, value=1)
 
 
 def _percent(cell_mv):
@@ -57,18 +64,31 @@ def _percent(cell_mv):
     return 0
 
 
+def park():
+    # GPIO29 is the wireless clock. After a sample taken with the radio off,
+    # leave it as an input so that clock does not run during sleep.
+    try:
+        Pin(29, Pin.IN, Pin.PULL_DOWN)
+        Pin(25, Pin.OUT, value=1)
+    except Exception:
+        pass
+
+
 def read():
     try:
         vsys = _vsys_mv()
     except Exception:
         return {"power": "unknown"}
     if vsys >= USB_MV:
-        return {"power": "usb"}
+        return {"power": "usb", "vsys_mv": vsys}
+    if vsys < 2500:
+        return {"power": "unknown", "vsys_mv": vsys}
     cell = vsys + DIODE_MV
-    if cell < 2500 or cell > 4500:
-        return {"power": "unknown"}
+    if cell > 4500:
+        cell = 4500
     return {
         "power": "battery",
+        "vsys_mv": vsys,
         "battery_mv": cell,
         "battery_pct": _percent(cell),
     }
